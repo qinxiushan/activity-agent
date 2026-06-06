@@ -84,7 +84,6 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
   const [state, setState] = useState<ActivityState>(INITIAL);
   const esRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(null);
-  const toolIndexRef = useRef<Record<string, number>>({});
   const planPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPlanPoll = useCallback(() => {
@@ -155,7 +154,6 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
             startedAt: Date.now(),
             endedAt: null,
           };
-          toolIndexRef.current[id] = state.toolCalls.length + Object.keys(toolIndexRef.current).length;
           setState((prev) => ({ ...prev, toolCalls: [...prev.toolCalls, tc] }));
           break;
         }
@@ -190,7 +188,6 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
 
   const startSession = useCallback(async (cwd: string, message: string, model: { provider: string; modelId: string }) => {
     setState({ ...INITIAL, error: null });
-    toolIndexRef.current = {};
     try {
       const res = await fetch(`${serverBase}/api/agent/new`, {
         method: "POST",
@@ -227,7 +224,6 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
     esRef.current = null;
     stopPlanPoll();
     sessionIdRef.current = null;
-    toolIndexRef.current = {};
     setState(INITIAL);
   }, [stopPlanPoll]);
 
