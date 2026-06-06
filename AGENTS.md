@@ -80,9 +80,16 @@ app/api/
   agent/new/route.ts              POST { cwd, message, toolNames?, provider?, modelId? }
   agent/[id]/route.ts             GET state | POST any command
   agent/[id]/events/route.ts      GET SSE stream
+  plan-state/[id]/route.ts        GET plan state for /activity UI
   files/[...path]/route.ts        GET file contents for viewer
   models/route.ts                 GET { models, modelList, defaultModel }
   models-config/route.ts          GET/POST — read/write ~/.pi/agent/models.json
+
+app/
+  layout.tsx            Root layout, dark/light theme bootstrap
+  page.tsx              Main pi-web shell (SessionSidebar + ChatWindow + FileViewer)
+  activity/page.tsx     Activity-specific UI: SOP-v2 phase progress + tool timeline + plan + booking
+  globals.css           CSS variables (light + dark), shared styles
 
 lib/
   rpc-manager.ts           AgentSessionWrapper + startRpcSession
@@ -113,10 +120,43 @@ src/
     activity-planner.ts    Chinese system prompt
                            (single-confirm + SOP boundaries + thinking limits)
 
+components/
+  activity/                Activity-specific UI (used by /activity page)
+    PhaseProgress.tsx      8-step horizontal progress with active-phase highlight
+    PlanTimeline.tsx       Vertical timeline of plan legs (departure/transit/activity/meal)
+    ToolTimeline.tsx       Tool call waterfall with name/icon/duration
+    BookingCard.tsx        Order confirmation card (extracted from reservation_exec result)
+    ActivityPanel.tsx      Composes the four components
+hooks/
+  useActivitySession.ts    Minimal SSE + plan-state polling hook (separate from useAgentSession)
+
 scripts/
-  p0-smoke-test.ts         Unit + integration tests (90 assertions, no API)
+  p0-smoke-test.ts         Unit + integration tests (94 assertions, no API)
   e2e-real-llm-test.ts     Real LLM end-to-end test (requires API key)
 ```
+
+## Activity UI (`/activity` page)
+
+A purpose-built UI for activity planning — separate from the generic pi-web shell
+at `/`. Goes to the URL in your dev server: <http://localhost:30142/activity>.
+
+**Layout**: 2-pane (chat left · activity panel right)
+
+**Activity panel** (right side) shows:
+1. **Phase progress** — 8-step horizontal bar (idle → intent_capture → clarifying → planning → plan_confirm → executing → completed), current phase highlighted, "turn N · clarification M/1" status
+2. **Booking card** — appears in `executing`/`completed` phase, extracted from `reservation_exec` / `query_booking` results (restaurant / date / time / 确认码 / 订单号)
+3. **Plan timeline** — vertical timeline of plan legs (departure 🚌 / transit 🚇 / activity 🎯 / meal 🍴 / rest ☕), weather summary, totals (duration / cost / legs)
+4. **Tool timeline** — waterfall of all tool calls with name/icon/args/duration/BLOCKED badge for `PHASE_GUARD` hits
+
+**Why separate page**: The pi-web shell at `/` is a generic coding-agent UI. The
+`/activity` page is a vertical slice that visualizes the SOP-v2 workflow end-to-end
+(phase progress, plan, booking, tool calls), which is the actual product we're
+shipping.
+
+**Data sources**:
+- SSE: `/api/agent/[id]/events` (tool_execution_start/end, message_end)
+- Plan state polling: `/api/plan-state/[id]` (every 1.5s)
+- Session create: `/api/agent/new`
 
 ## Session + Plan State Persistence
 
