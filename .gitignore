@@ -46,3 +46,10 @@ next-env.d.ts
 
 # local e2e test artifacts
 /tmp/
+
+# playwright
+/playwright-report/
+/test-results/
+/tests/__screenshots__/
+/blob-report/
+.playwright/
