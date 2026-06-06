@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ActivityPanel } from "@/components/activity/ActivityPanel";
 import { useActivitySession } from "@/hooks/useActivitySession";
+import { useTheme } from "@/hooks/useTheme";
 
 interface ModelInfo {
   id: string;
@@ -27,6 +28,7 @@ export default function ActivityPage() {
   const [model, setModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [modelList, setModelList] = useState<ModelInfo[]>([]);
   const activity = useActivitySession();
+  const { isDark, toggleTheme } = useTheme();
 
   useEffect(() => {
     fetch("/api/home").then((r) => r.json()).then((d: { cwd?: string }) => {
@@ -62,6 +64,38 @@ export default function ActivityPage() {
               <div style={{ fontSize: 10, color: "var(--text-dim)" }}>SOP-v2 活动规划 · 单次确认 + 1 次追问</div>
             </div>
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  toggleTheme({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+                }}
+                title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                aria-pressed={isDark}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 28, height: 28, padding: 0,
+                  background: "none", border: "1px solid var(--border)",
+                  color: "var(--text-muted)", borderRadius: 6, cursor: "pointer",
+                  transition: "color 0.12s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+              >
+                {isDark ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="5" />
+                    <line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" />
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                    <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                  </svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                  </svg>
+                )}
+              </button>
               {activity.sessionId && (
                 <button
                   onClick={() => activity.reset()}
