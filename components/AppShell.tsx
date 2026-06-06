@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
@@ -16,6 +16,7 @@ import type { ChatInputHandle } from "./ChatInput";
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const { isDark, toggleTheme } = useTheme();
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
@@ -384,6 +385,28 @@ export function AppShell() {
               </svg>
             )}
           </button>
+          <a
+            href="/activity"
+            title="Activity Planner"
+            aria-label="Activity Planner"
+            aria-current={pathname === "/activity" ? "page" : undefined}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 36, height: 36, padding: 0,
+              background: "none", border: "none", borderRight: "1px solid var(--border)",
+              color: pathname === "/activity" ? "var(--text)" : "var(--text-muted)",
+              cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
+              textDecoration: "none",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = pathname === "/activity" ? "var(--text)" : "var(--text-muted)"; }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <circle cx="12" cy="12" r="6" />
+              <circle cx="12" cy="12" r="2" />
+            </svg>
+          </a>
           {showChat && (
             <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
               <BranchNavigator
