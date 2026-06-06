@@ -4,6 +4,8 @@
 >
 > **报告时间**：2026-06-06
 >
+> **最后更新**：2026-06-06（SOP-v2 同步，见附录 C "状态同步日志"）
+>
 > **基线版本**：
 > - `activity-agent`：本地 `package.json`（commit HEAD）
 > - `pi-coding-agent`：**npm registry 0.75.5**（非本地源码；本地 monorepo 源码为 0.76.0，存在小幅 API 差异）
@@ -28,6 +30,7 @@
 11. [第十部分：行号参考速查表](#11-第十部分行号参考速查表)
 12. [附录 A：术语表](#附录-a术语表)
 13. [附录 B：完整路由清单](#附录-b完整路由清单)
+14. [附录 C：状态同步日志（2026-06-06 SOP-v2）](#附录-c状态同步日志2026-06-06-sop-v2)
 
 ---
 
@@ -47,7 +50,7 @@
 |------|------|
 | **activity-agent 是不是 pi-coding-agent 的 Extension** | ❌ 不是。它没有用 Extension 系统 |
 | **activity-agent 用 pi-coding-agent 的方式** | 通过 `createAgentSession({ customTools, resourceLoader })` 工厂方法直接构造 AgentSession |
-| **activity-agent 做了哪些定制** | 3 个核心扩展点：①6 个活动规划 `customTools` 注入 ②自定义 `ResourceLoader` 包装注入中文系统 prompt ③Map+ SSE 桥接实现多 session 并发 |
+| **activity-agent 做了哪些定制** | 3 个核心扩展点：①**12 个**活动规划 `customTools` 注入（SOP-v2） ②自定义 `ResourceLoader` 包装注入中文系统 prompt ③Map+ SSE 桥接实现多 session 并发 |
 | **activity-agent 没用哪些能力** | Extension 系统、`registerCommand`、TUI UI 钩子（widget/footer/status）、shortcut、`navigateTree`、`compact`、`steer`/`followUp`（API 暴露但前端未接） |
 | **可改进空间** | 3 个高优先级 + 5 个中优先级（见第 10 节） |
 
@@ -154,13 +157,19 @@ pi-web 中有 6 个 UI 组件在 activity-agent 中缺失，**本次工作未涉
 ┌──────────────────────────▼──────────────────────────────────────────┐
 │ Layer 3: lib/ (业务逻辑层)                                            │
 │   - lib/rpc-manager.ts (RPCManager: 多 session 状态机)                 │
+│   - lib/plan-state.ts (PlanStateManager: 8 阶段 SOP-v2 状态机)       │
+│   - lib/tool-wrapper.ts (tool retry/timeout/metrics 包装)             │
+│   - lib/poi-database.ts (34 POI: 22 活动 + 12 餐厅)                 │
+│   - lib/weather-service.ts / lib/route-service.ts /                │
+│     lib/opening-hours-service.ts (deterministic mock 数据)          │
+│   - lib/booking-service.ts (真实预订状态机)                          │
 │   - lib/agent-client.ts (agent 客户端封装)                            │
 │   - lib/pi-types.ts (TypeScript 类型桥接)                            │
 │   - lib/session-reader.ts (会话读取)                                  │
 │   - lib/file-paths.ts (路径工具)                                     │
 │   - lib/normalize.ts (数据规范化)                                     │
 └──────────────────────────┬──────────────────────────────────────────┘
-                           │ npm package
+                            │ npm package
 ┌──────────────────────────▼──────────────────────────────────────────┐
 │ Layer 4: @earendil-works/pi-coding-agent 0.75.5                     │
 │   - core/agent-session.ts (AgentSession ~3096 行)                  │
@@ -225,22 +234,30 @@ export interface AgentSessionLike {
 
 **职责**：封装单个 AgentSession 的所有操作，向上层（API route）提供简单的函数式 API（`sendMessage`、`abort`、`setModel` 等）。
 
-#### 3.2.4 `src/tools/activity-tools.ts` — 6 个活动规划工具
+#### 3.2.4 `src/tools/activity-tools.ts` — 12 个活动规划工具（SOP-v2）
 
-**位置**：`activity-agent/src/tools/activity-tools.ts`
+**位置**：`activity-agent/src/tools/activity-tools.ts`（718 行）
 
-**职责**：定义 6 个自定义工具，每个都是 `ToolDefinition` 形状：
+**职责**：定义 **12 个**自定义工具（SOP-v2 升级后从 6 个扩展），按 4 个 phase 分组：
 
-| 工具名 | 用途 |
-|--------|------|
-| `plan_activity` | 把对话转化为结构化活动计划 |
-| `validate_activity` | 校验活动计划完整性 |
-| `refine_activity` | 根据反馈优化活动计划 |
-| `export_activity` | 导出活动计划为 JSON/Markdown |
-| `summarize_session` | 总结当前 session 的对话 |
-| `list_activities` | 列出 session 内所有活动 |
+| # | 工具名 | 所属 phase | 用途 |
+|---|--------|-----------|------|
+| 1 | `intent_parse` | `intent_capture` | 记录结构化意图 **或** 提交最终方案（`submitPlan: true`） |
+| 2 | `ask_clarification` | `intent_capture` | 1-shot 追问（`MAX_CLARIFICATIONS=1` 硬限） |
+| 3 | `get_weather` | `planning` | 真实天气查询（deterministic mock） |
+| 4 | `search_activities` | `planning` | 活动 POI 查询（22 条真实 POI） |
+| 5 | `search_restaurants` | `planning` | 餐厅 POI 查询（12 条真实 POI） |
+| 6 | `check_opening_hours` | `planning` | 营业时间校验 |
+| 7 | `compute_route` | `planning` | 通勤时间（步行/公交/驾车，Haversine） |
+| 8 | `reservation_exec` | `executing` | 真实预订状态机（pending → confirmed/failed） |
+| 9 | `query_booking` | `executing` | 查询订单状态 |
+| 10 | `retry_booking` | `executing` | 重试失败订单 |
+| 11 | `plan_save` | persist | 保存最终方案到 plan-state 文件 |
+| 12 | `plan_load` | persist | 加载历史方案 |
 
-**注入方式**：作为 `customTools` 数组传给 `createAgentSession()`（`lib/rpc-manager.ts:325`）。
+**注入方式**：作为 `customTools` 数组传给 `createAgentSession()`（`lib/rpc-manager.ts:366-371`）。
+
+**Phase 守卫**：每个工具的 `execute` 被 `guardToolCallWithActive` 包装（`lib/plan-state.ts:291`），跨 phase 调用返回 `PHASE_GUARD` 错误。例如 `reservation_exec` 只允许在 `executing` phase，`intent_parse(submitPlan:true)` 只允许在 `planning`。
 
 ### 3.3 数据流：从用户发消息到屏幕更新
 
@@ -727,7 +744,7 @@ class ExtensionRunner {
 
 | 需求 | 选择 |
 |------|------|
-| 让 LLM 创建一个活动计划 | ✅ Tool（`plan_activity`） |
+| 让 LLM 理解并记录用户意图 | ✅ Tool（`intent_parse`） |
 | 每次 tool_call 后发送埋点 | ✅ Extension（订阅 `tool_call` 事件） |
 | 添加一个 `/export` 斜杠命令 | ✅ Extension（`registerCommand`） |
 | 改变 LLM 的 system prompt | ✅ ResourceLoader 包装（不是 Tool/Extension） |
@@ -864,45 +881,44 @@ class ExtensionRunner {
 
 #### 9.1.1 customTools 注入（领域能力定制）
 
-**位置**：`lib/rpc-manager.ts:325-331`
+**位置**：`lib/rpc-manager.ts:34`（`ACTIVITY_TOOLS = getActivityPlannerTools()`）+ `lib/rpc-manager.ts:363-371`（`createAgentSession` 调用）
 
 **代码**：
 
 ```typescript
-const { session } = await createAgentSession({
+const ACTIVITY_TOOLS = getActivityPlannerTools();  // 12 个活动规划工具
+// ...
+const activityToolsList = ACTIVITY_TOOLS;
+const resourceLoader = createActivityResourceLoader(cwd, agentDir);
+const { session: inner } = await createAgentSession({
   cwd: this.cwd,
   model: this.model,
-  customTools: [
-    ...ACTIVITY_TOOLS,  // 6 个活动规划工具
-  ],
-  resourceLoader: createResourceLoader(this.cwd),
+  customTools: activityToolsList,
+  resourceLoader,
 });
 ```
 
-**效果**：6 个活动规划工具对 LLM 可见，LLM 可以自动选择调用。
+**效果**：**12 个**活动规划工具对 LLM 可见，LLM 可以自动选择调用。每个工具都受 `lib/plan-state.ts` 的 `TOOL_PHASE_RULES` 守卫，跨 phase 调用会返回 `PHASE_GUARD` 错误。
 
 #### 9.1.2 ResourceLoader 包装（系统 prompt 定制）
 
-**位置**：`lib/rpc-manager.ts:280-322`
+**位置**：`lib/rpc-manager.ts:13`（`createActivityResourceLoader` 函数定义）+ `lib/rpc-manager.ts:364`（调用点）
 
 **代码**：
 
 ```typescript
-function createResourceLoader(cwd: string): ResourceLoader {
-  const inner = new DefaultResourceLoader({
-    cwd,
-    systemPromptOverride: ZH_SYSTEM_PROMPT,  // 完全替换
-  });
-
+function createActivityResourceLoader(cwd: string, agentDir: string): ResourceLoader {
+  // 包装 DefaultResourceLoader，注入中文 SOP-v2 prompt + 8 阶段工作流规则
+  // ...
   return {
     ...inner,
-    getSystemPrompt: () => ZH_SYSTEM_PROMPT,           // 中文系统 prompt
-    getAppendSystemPrompt: () => ACTIVITY_RULES,       // 活动规划规则
+    getSystemPrompt: () => ZH_ACTIVITY_SYSTEM_PROMPT,   // 中文 SOP-v2 prompt
+    getAppendSystemPrompt: () => ACTIVITY_RULES,        // 8 阶段 + 1-clarify 规则
   };
 }
 ```
 
-**效果**：所有 LLM 调用的 system prompt 都是中文 + 活动规划指令。
+**效果**：所有 LLM 调用的 system prompt 都是中文 + 8 阶段 SOP-v2 工作流指令（单次确认 + 1-clarify 硬限 + auto-planning）。
 
 #### 9.1.3 SSE 桥（协议转换）
 
@@ -1067,7 +1083,11 @@ const cleanup = session.subscribe((event: AgentSessionEvent) => {
 | | `lib/rpc-manager.ts` | 280-322 | createResourceLoader 包装 |
 | | `lib/rpc-manager.ts` | 325-331 | createAgentSession 调用 |
 | **类型桥** | `lib/pi-types.ts` | (全文) | `AgentSessionLike` 接口 |
-| **Tools** | `src/tools/activity-tools.ts` | (全文) | 6 个活动规划工具 |
+| **Tools** | `src/tools/activity-tools.ts` | (全文，718 行) | **12 个**活动规划工具（SOP-v2） |
+| **Plan State** | `lib/plan-state.ts` | (全文，297 行) | PlanStateManager: 8 阶段 SOP-v2 状态机 |
+| **Tool Wrapper** | `lib/tool-wrapper.ts` | (全文) | retry/timeout/metrics 包装 |
+| **POI DB** | `lib/poi-database.ts` | (全文) | 34 POI（22 活动 + 12 餐厅） |
+| **Booking** | `lib/booking-service.ts` | (全文) | 真实预订状态机 |
 
 ### 11.3 路由文件清单
 
@@ -1167,9 +1187,59 @@ export async function POST() {
 
 ---
 
+## 附录 C：状态同步日志（2026-06-06 SOP-v2）
+
+### C.1 背景
+
+本报告原始版本（v1.0）的 §3.2.4 / §8.1 / §9.1 / §11.2 等多处描述基于"5 步工作流 + 6 个工具"的早期实现。2026-06-06 SOP-v2 上线后，工作流升级为 **8 阶段状态机**，工具数从 6 扩到 12。本次同步聚焦于：
+
+- 修正工具数（6 → 12）和工具列表
+- 同步 `lib/rpc-manager.ts` 中 `createAgentSession` / `createResourceLoader` 的实际行号
+- 反映 `lib/plan-state.ts`（297 行）作为 8 阶段状态机核心模块的存在
+- 增加 `lib/tool-wrapper.ts` / `lib/poi-database.ts` / `lib/booking-service.ts` 等新模块
+
+### C.2 同步清单
+
+| 章节 | 原内容 | 同步后 |
+|------|--------|--------|
+| §1.2 TL;DR | "6 个活动规划 customTools" | **12 个** + SOP-v2 注 |
+| §3.1 Layer 3 | 5 个 lib/* 模块 | **11 个 lib/* 模块**（新增 plan-state / tool-wrapper / 4 个服务） |
+| §3.2.4 | "6 个工具"（错误工具名） | 12 个工具的完整列表 + phase 守卫说明 |
+| §9.1.1 | "6 个"、行号 325-331 | 12 个、行号 34 + 363-371 |
+| §9.1.2 | "createResourceLoader"、行号 280-322 | "createActivityResourceLoader"、行号 13 + 364 |
+| §11.2 | "6 个活动规划工具" | 12 个 + 新增 plan-state / tool-wrapper / POI / booking |
+
+### C.3 仍未同步的"历史视角"内容
+
+为保留本报告作为"activity-agent 集成演进史"的分析价值，**以下内容保持原始描述不变**：
+
+- §2 "路由对齐工作"（17 个文件差异处理）— 一次性集成工作的快照
+- §6 "Extension 概念详解" — 与 activity-agent 是否使用 Extension 系统的对比
+- §8.1 "Step 1-13 流程图" — pi-coding-agent 通用流，泛用
+- §10 "改进建议" — 10.1/10.2 中的 Hook 拆分、Zustand 迁移、SSE 重连等仍为有效建议
+
+### C.4 同步未覆盖的范围
+
+本次同步**不**涉及：
+
+- 代码层面的实际改动（仅文档同步）
+- 验证测试运行（smoke + e2e 在原 commit 中已通过）
+- 新功能的实际部署（SOP-v2 已在生产演示中通过 24/24 e2e）
+
+### C.5 关联文档同步状态
+
+| 文档 | 同步状态 |
+|------|---------|
+| `HANDOFF.md` | ✅ 已存在（SOP-v2 视角） |
+| `AGENTS.md` | ✅ 已存在（SOP-v2 视角） |
+| `BUSINESS_ANALYSIS_REPORT.md` | ✅ 2026-06-06 同步（§0 状态同步 + §一/§二/§十 更新） |
+| `INTEGRATION_REPORT.md` | ✅ 2026-06-06 同步（本附录 + §1.2/§3.1/§3.2.4/§9.1/§11.2 更新） |
+
+---
+
 ## 报告结束
 
 **报告作者**：activity-agent 集成分析  
 **最后更新**：2026-06-06  
-**版本**：v1.0  
+**版本**：v1.1（含 SOP-v2 同步）  
 **许可**：内部文档
