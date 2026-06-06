@@ -43,49 +43,66 @@ export function PhaseProgress({ planState }: { planState: ActivityPlanState | nu
         SOP-v2 阶段进度
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, marginBottom: 12 }}>
-        {PHASES.map((p, i) => {
-          const isCurrent = p.key === currentKey;
-          const isPast = i < currentIdx;
-          const isCancelled = currentKey === "cancelled";
-          const dotBg = isCurrent
-            ? "var(--accent)"
-            : isPast
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          {PHASES.map((p, i) => {
+            const isCurrent = p.key === currentKey;
+            const isPast = i < currentIdx;
+            const dotBg = isCurrent
+              ? "var(--accent)"
+              : isPast
+                ? "color-mix(in srgb, var(--accent) 50%, transparent)"
+                : "var(--bg-hover)";
+            const dotColor = isCurrent || isPast ? "white" : "var(--text-dim)";
+            const isLast = i === PHASES.length - 1;
+            const connectorBg = isPast
               ? "color-mix(in srgb, var(--accent) 50%, transparent)"
-              : "var(--bg-hover)";
-          const dotColor = isCurrent || isPast ? "white" : "var(--text-dim)";
-          return (
-            <div key={p.key} style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, minWidth: 0 }}>
-              <div style={{
-                width: 26, height: 26, borderRadius: "50%",
-                background: dotBg, color: dotColor,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 12, fontWeight: 600,
-                boxShadow: isCurrent ? "0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent)" : "none",
-                transition: "all 0.3s",
-              }}>
-                {isPast ? "✓" : p.icon}
-              </div>
-              <div style={{
-                fontSize: 9, marginTop: 4, color: isCurrent ? "var(--text)" : "var(--text-dim)",
-                fontWeight: isCurrent ? 600 : 400, textAlign: "center", whiteSpace: "nowrap",
-              }}>
-                {p.label}
-              </div>
-              {i < PHASES.length - 1 && (
+              : "var(--border)";
+            return (
+              <div key={p.key} style={{ display: "flex", alignItems: "center", flex: isLast ? "0 0 auto" : 1, minWidth: 0 }}>
                 <div style={{
-                  position: "absolute",
-                  height: 2,
-                  background: isPast ? "color-mix(in srgb, var(--accent) 50%, transparent)" : "var(--border)",
-                  width: "calc((100% - 26px * 7) / 6)",
-                  marginLeft: 13 + 26 / 2,
-                  marginTop: -16,
-                  zIndex: -1,
-                }} />
-              )}
-            </div>
-          );
-        })}
+                  width: 26, height: 26, borderRadius: "50%",
+                  background: dotBg, color: dotColor,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 12, fontWeight: 600, flexShrink: 0,
+                  boxShadow: isCurrent ? "0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent)" : "none",
+                  transition: "all 0.3s",
+                }}>
+                  {isPast ? "✓" : p.icon}
+                </div>
+                {!isLast && (
+                  <div style={{
+                    flex: 1, height: 2, background: connectorBg,
+                    marginLeft: 4, marginRight: 4, minWidth: 4,
+                    transition: "background 0.3s",
+                  }} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 4, marginTop: 6 }}>
+          {PHASES.map((p, i) => {
+            const isCurrent = p.key === currentKey;
+            const isLast = i === PHASES.length - 1;
+            return (
+              <div key={p.key} style={{
+                flex: isLast ? "0 0 auto" : 1, minWidth: 0,
+                display: "flex", flexDirection: "column", alignItems: "center",
+              }}>
+                <div style={{
+                  fontSize: 9, color: isCurrent ? "var(--text)" : "var(--text-dim)",
+                  fontWeight: isCurrent ? 600 : 400, textAlign: "center",
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  maxWidth: "100%",
+                  paddingLeft: 4, paddingRight: 4,
+                }}>
+                  {p.label}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <div style={{
