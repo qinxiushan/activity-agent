@@ -334,6 +334,43 @@ async function main() {
     }, undefined, undefined, {} as never);
     log("intent_parse with submitPlan succeeded", (r6.details as { planSubmitted?: boolean })?.planSubmitted === true);
     log("Phase transitioned to plan_confirm", mgr4.currentPhase === "plan_confirm");
+
+    const mgr5 = new PlanStateManager("smoke-resubmit");
+    setActivePlanState(mgr5);
+    await mgr5.transition("intent_capture", "start");
+    await mgr5.transition("planning", "fields ok");
+    await mgr5.transition("plan_confirm", "first submit");
+    const r7 = await ipTool.execute!("id", {
+      submitPlan: true,
+      plan: {
+        summary: "二次提交（应被拒）",
+        timeline: [{ startTime: "10:00", endTime: "12:00", type: "activity", poiName: "x" }],
+        totalCost: 100, totalDurationMinutes: 120,
+        weather: { city: "北京", date: "2026-07-15", condition: "sunny", tempMax: 30, tempMin: 20, advice: "" },
+      },
+    }, undefined, undefined, {} as never);
+    const resubmitCode = (r7.details as { code?: string })?.code;
+    log("intent_parse submitPlan=true BLOCKED in plan_confirm (P1: 防 LLM 二次提交覆盖执行状态)", resubmitCode === "SUBMIT_PLAN_OUT_OF_PHASE" || resubmitCode === "PHASE_GUARD", resubmitCode ?? "");
+
+    const mgr6 = new PlanStateManager("smoke-resubmit-executing");
+    setActivePlanState(mgr6);
+    await mgr6.transition("intent_capture", "start");
+    await mgr6.transition("planning", "fields ok");
+    await mgr6.transition("plan_confirm", "first submit");
+    await mgr6.transition("executing", "user confirmed");
+    const r8 = await ipTool.execute!("id", {
+      submitPlan: true,
+      plan: {
+        summary: "executing 阶段再次提交（应被拒）",
+        timeline: [{ startTime: "10:00", endTime: "12:00", type: "activity", poiName: "x" }],
+        totalCost: 100, totalDurationMinutes: 120,
+        weather: { city: "北京", date: "2026-07-15", condition: "sunny", tempMax: 30, tempMin: 20, advice: "" },
+      },
+    }, undefined, undefined, {} as never);
+    const resubmitExecCode = (r8.details as { code?: string })?.code;
+    log("intent_parse submitPlan=true BLOCKED in executing (P1: 防 LLM 二次提交覆盖执行状态)", resubmitExecCode === "SUBMIT_PLAN_OUT_OF_PHASE" || resubmitExecCode === "PHASE_GUARD", resubmitExecCode ?? "");
+
+    setActivePlanState(mgr4);
   }
 
   // 每个工具 execute 一次（验证无 crash）
