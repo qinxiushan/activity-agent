@@ -189,6 +189,18 @@ export function getActivityPlannerTools(): ToolDefinition[] {
         const mgr = getActivePlanState();
 
         if (params.submitPlan && params.plan) {
+          if (mgr && mgr.currentPhase !== "planning") {
+            return {
+              content: [{ type: "text" as const, text: JSON.stringify({
+                error: true,
+                code: "SUBMIT_PLAN_OUT_OF_PHASE",
+                message: `submitPlan=true 仅在 planning 阶段合法（当前阶段: ${mgr.currentPhase}）。` +
+                         `plan_confirm/executing 阶段再次提交方案会覆盖当前执行状态，已被拒绝。`,
+                currentPhase: mgr.currentPhase,
+              }, null, 2) }],
+              details: { error: true, code: "SUBMIT_PLAN_OUT_OF_PHASE" },
+            };
+          }
           if (mgr) {
             mgr.recordPlan({
               summary: params.plan.summary,
