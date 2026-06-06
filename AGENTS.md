@@ -1,0 +1,196 @@
+# Activity Agent - Development Notes
+
+## Quick Start
+
+```bash
+npm run dev                  # port 30142
+```
+
+| Check | Command |
+|-------|---------|
+| Typecheck | `node_modules/.bin/tsc --noEmit` |
+| Unit + integration smoke (no API key) | `npx tsx scripts/p0-smoke-test.ts` |
+| Real LLM e2e (HTTP, requires dev server + API key) | `npm run e2e:real` |
+
+## Workflow: SOP-v2 (8 phases, single-confirm, 1-clarify)
+
+```
+                          ┌─→ clarifying (MAX 1) ─┐
+                          │                        │
+[user msg] → intent_capture ───────────────────┐    │
+                                ↓              │    │
+                            planning (auto) ←──┘    │
+                                ↓                   │
+                          plan_confirm ⭐ ONLY confirmation point
+                                ↓ confirm
+                            executing → completed
+```
+
+**Hard constraints:**
+- **Single user confirmation** at `plan_confirm` (no intermediate "is this OK?")
+- **1-clarify limit** — `ask_clarification` can be invoked at most once per session
+- **Auto-planning** — LLM calls `get_weather` / `search_*` / `check_opening_hours` / `compute_route` without user interaction
+- **Phase guard** — every tool wrapped with `guardToolCallWithActive`, illegal-phase calls return `PHASE_GUARD` error
+
+## 12 Tools (by phase)
+
+| Phase | Tool | Role |
+|-------|------|------|
+| 1 intent | `intent_parse` | Record structured intent **OR** submit final plan (`submitPlan: true`) |
+| 1 intent | `ask_clarification` | 1-shot clarifying question (硬限 1) |
+| 2 planning | `get_weather` | Weather forecast for the day |
+| 2 planning | `search_activities` | Activity POI query (real DB, 22 POIs) |
+| 2 planning | `search_restaurants` | Restaurant POI query (real DB, 12 POIs) |
+| 2 planning | `check_opening_hours` | Verify POI is open at planned time |
+| 2 planning | `compute_route` | Transit time between POIs (auto walking/transit/driving) |
+| 3 execution | `reservation_exec` | Real restaurant booking (state machine) |
+| 3 execution | `query_booking` | Check order status |
+| 3 execution | `retry_booking` | Retry failed order |
+| persist | `plan_save` | Save final plan |
+| persist | `plan_load` | Load historical plan |
+
+## Architecture
+
+```
+Browser                Next.js Server              AgentSession (in-process)
+  │                        │                               │
+  ├─ GET /api/sessions ────▶ reads ~/.pi/agent/sessions/   │
+  ├─ GET /api/sessions/[id] reads .jsonl file directly     │
+  │                        │                               │
+  ├─ send message ─────────▶ POST /api/agent/[id]          │
+  │                        │   startRpcSession() ─────────▶│ createAgentSession()
+  │                        │   session.send(cmd) ─────────▶│ session.prompt()
+  │                        │   advancePlanPhase(msg) ─────▶│ transition plan state
+  │                        │                               │
+  ├─ SSE connect ──────────▶ GET /api/agent/[id]/events    │
+  │                        │   session.onEvent() ◀─────────│ session.subscribe()
+  │◀── data: {...} ─────────│                               │
+```
+
+**Custom Tools**: 12 activity planning tools registered via `customTools` in `rpc-manager.ts`.
+**System Prompt**: Chinese single-confirm SOP prompt from `src/prompts/activity-planner.ts`.
+
+## File Map
+
+```
+app/api/
+  sessions/route.ts               GET  list all sessions
+  sessions/[id]/route.ts          GET/PATCH/DELETE session
+  sessions/[id]/context/route.ts  GET ?leafId= — context for a specific leaf
+  agent/new/route.ts              POST { cwd, message, toolNames?, provider?, modelId? }
+  agent/[id]/route.ts             GET state | POST any command
+  agent/[id]/events/route.ts      GET SSE stream
+  files/[...path]/route.ts        GET file contents for viewer
+  models/route.ts                 GET { models, modelList, defaultModel }
+  models-config/route.ts          GET/POST — read/write ~/.pi/agent/models.json
+
+lib/
+  rpc-manager.ts           AgentSessionWrapper + startRpcSession
+                           + advancePlanPhase (idle/completed/cancelled → intent_capture;
+                                                clarifying → planning;
+                                                plan_confirm → executing/planning/intent_capture)
+  plan-state.ts            8-phase state machine, tool-phase rules,
+                           getMissingCriticalFields, MAX_CLARIFICATIONS=1
+  poi-database.ts          34 POIs (22 activities + 12 restaurants) across 北京/上海/深圳
+                           + Haversine distance + 4D scoring
+  booking-service.ts       Real booking state machine
+                           (pending → processing → confirmed/failed → notified)
+  weather-service.ts       Mock weather (deterministic by date+city hash)
+  route-service.ts         Haversine + transit time (walking/transit/driving)
+  opening-hours-service.ts Parse opening hours string + open/close check
+  tool-wrapper.ts          Generic retry/timeout/fallback/metrics wrapper
+  session-reader.ts        parse .jsonl; getModelList/getDefaultModel
+  types.ts                 shared TypeScript types
+  normalize.ts             normalizeToolCalls()
+  agent-client.ts          client-side fetch helper for /api/agent/[id]
+  pi-types.ts              AgentSessionLike interface
+
+src/
+  tools/
+    activity-tools.ts      12 ToolDefinitions + per-tool P0 wrappers
+    tool-utils.ts          Response helpers
+  prompts/
+    activity-planner.ts    Chinese system prompt
+                           (single-confirm + SOP boundaries + thinking limits)
+
+scripts/
+  p0-smoke-test.ts         Unit + integration tests (90 assertions, no API)
+  e2e-real-llm-test.ts     Real LLM end-to-end test (requires API key)
+```
+
+## Session + Plan State Persistence
+
+| File | Location | Format |
+|------|----------|--------|
+| Session log | `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl` | JSONL events |
+| Plan state | `~/.pi/agent/plan-states/<sessionId>.json` | JSON snapshot |
+
+Plan state tracks: `phase`, `turnCount`, `clarificationCount`, `intent`, `plan`, `history`.
+
+```jsonl
+{"type":"session","version":3,"id":"<uuid>","timestamp":"...","cwd":"/path","parentSession":"/abs/path"}
+{"type":"model_change","provider":"zenmux","modelId":"claude-sonnet-4-6","timestamp":"..."}
+{"type":"message","message":{"role":"user","content":"..."}}
+{"type":"message","message":{"role":"assistant","content":[...],"toolCalls":[...]}}
+```
+
+## Key Design Differences from pi-web
+
+- **12 custom activity tools** (vs pi-web's coding tools)
+- **Real POI database** (34 entries) replaces LLM-fabricated recommendations
+- **Real booking state machine** replaces mock reservation
+- **Phase guard** wraps every tool to enforce workflow
+- **Tool wrapper** provides retry/timeout/fallback for resilience
+- **8-state machine** with single-confirm UX (vs 5-step confirm-each)
+- **Auto-planning phase** — LLM does weather/POI/route without user
+- No built-in coding tools (read, bash, edit, write, etc.)
+
+## Verification Recipes
+
+### Smoke test (no API key)
+```bash
+npx tsx scripts/p0-smoke-test.ts
+# Expected: 90/90 pass, exit 0
+```
+
+### Real LLM e2e (HTTP client — requires configured model + API key + running dev server)
+
+The e2e script is an **HTTP client** that drives the Next.js dev server via
+`fetch()` and SSE. This sidesteps a known issue: `pi-coding-agent`'s `exports`
+field has no CJS condition, so `npx tsx`'s CJS register can't load it at
+runtime. The HTTP client has zero `lib/` imports — it talks to the public API
+surface only.
+
+```bash
+# 1. Make sure a model is configured (and its provider has working credentials)
+cat ~/.pi/agent/models.json
+
+# 2. Start the dev server in one terminal
+npm run dev                              # port 30142
+
+# 3. Run the e2e test in another terminal
+npm run e2e:real
+# (equivalent to: ./node_modules/.bin/tsx scripts/e2e-real-llm-test.ts)
+```
+
+Override server URL if needed: `E2E_SERVER=http://localhost:30142 npm run e2e:real`.
+
+The e2e test:
+1. Reads `~/.pi/agent/models.json` (first model entry)
+2. Pings `${SERVER_BASE}/api/sessions` to confirm dev server is up
+3. POSTs to `/api/agent/new` with `{ type: "prompt", cwd: <temp>, message, provider, modelId }`
+4. Opens SSE stream to `/api/agent/[id]/events`, collects `tool_execution_*` + `message_end`
+5. Polls `/api/agent/[id]` waiting for `isStreaming: false`
+6. Asserts: `intent_parse` called, at least one `search_*` called, all SOP tools called (`get_weather`, `compute_route`, `check_opening_hours`), no premature `reservation_exec`
+7. Reads `~/.pi/agent/plan-states/<sessionId>.json` to verify final phase = `plan_confirm` and all 5 critical intent fields captured
+8. POSTs to `/api/agent/[id]` with `{ type: "prompt", message: "确认" }`
+9. Waits for second turn idle
+10. Asserts: phase transitioned to `executing`, `reservation_exec` called
+11. Prints: tool call sequence, plan state history, captured intent, captured plan, assistant text snippets
+12. DELETEs `/api/sessions/[id]` to clean up
+
+Exit codes:
+- `0` — all assertions pass
+- `1` — at least one assertion failed
+- `2` — preflight failed (no model / dev server unreachable)
+- `3` — runtime error (LLM crashed, HTTP error)
