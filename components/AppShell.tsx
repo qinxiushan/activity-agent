@@ -84,6 +84,18 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
 
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
 
+  const [identity, setIdentity] = useState<{ userId: string; isDev: boolean } | null>(null);
+  useEffect(() => {
+    fetch("/api/whoami")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d: { userId?: string; isDev?: boolean } | null) => {
+        if (d && typeof d.userId === "string") {
+          setIdentity({ userId: d.userId, isDev: d.isDev === true });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const handleAtMention = useCallback((relativePath: string) => {
     chatInputRef.current?.insertText("`" + relativePath + "`");
   }, []);
@@ -305,7 +317,7 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
       {/* Center: chat */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Top bar with sidebar toggle */}
-        <div ref={topBarRef} style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: "1px solid var(--border)", height: 36, background: "var(--bg-panel)" }}>
+        <div ref={topBarRef} style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: "1px solid var(--border)", height: 36, background: "var(--bg-panel)", position: "relative" }}>
           <button
             onClick={() => setSidebarOpen((v) => !v)}
             title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
@@ -504,6 +516,35 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
               </div>
             );
           })()}
+          {identity && (
+            <div
+              title={identity.isDev ? `dev mode (cookie): ${identity.userId}` : `user: ${identity.userId}`}
+              style={{
+                position: "absolute",
+                right: rightPanelOpen ? 12 : 48,
+                top: 0, bottom: 0,
+                display: "flex", alignItems: "center", gap: 6,
+                fontSize: 11, color: "var(--text-muted)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span style={{
+                width: 5, height: 5, borderRadius: "50%",
+                background: identity.isDev ? "#ef4444" : "var(--accent)",
+              }} />
+              {identity.userId}
+              {identity.isDev && (
+                <span style={{
+                  fontSize: 9, fontWeight: 600,
+                  color: "#ef4444",
+                  padding: "0 5px", borderRadius: 3,
+                  background: "rgba(239,68,68,0.1)",
+                  border: "1px solid rgba(239,68,68,0.3)",
+                  letterSpacing: 0.5,
+                }}>DEV</span>
+              )}
+            </div>
+          )}
           {/* Top panel dropdown — shared, only one active at a time */}
           {activeTopPanel && topPanelPos && (
             <div style={{
