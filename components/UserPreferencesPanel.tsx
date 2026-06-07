@@ -1,37 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { UserDeparturePoint, UserPreferences } from "@/lib/user-preferences";
 
-interface UserPreferencesDefaults {
-  partySize?: number;
-  groupType?: string;
-  budgetPerPerson?: number;
-  preferredCategories?: string[];
-  dietaryRestrictions?: string[];
-  mood?: string;
-  departurePoint?: string;
-  startTime?: string;
-  endTime?: string;
-}
-
-interface RecentIntent {
-  date?: string;
-  startTime?: string;
-  departurePoint?: string;
-  partySize?: number;
-  budgetPerPerson?: number;
-  recordedAt: number;
-}
-
-interface UserPreferences {
-  userId: string;
-  defaults: UserPreferencesDefaults;
-  recentIntents: RecentIntent[];
-  stats: { totalBookings: number; totalCompletedPlans: number };
-  lastUpdated: number;
-}
-
-const DEFAULT_LABELS: Record<keyof UserPreferencesDefaults, string> = {
+const DEFAULT_LABELS: Record<keyof UserPreferences["defaults"], string> = {
   partySize: "人数",
   groupType: "群体",
   budgetPerPerson: "人均预算",
@@ -39,19 +11,24 @@ const DEFAULT_LABELS: Record<keyof UserPreferencesDefaults, string> = {
   dietaryRestrictions: "饮食限制",
   mood: "氛围",
   departurePoint: "出发地",
-  startTime: "开始时间",
-  endTime: "结束时间",
 };
 
-const DISPLAY_FIELDS: (keyof UserPreferencesDefaults)[] = [
+const DISPLAY_FIELDS: (keyof UserPreferences["defaults"])[] = [
   "partySize", "groupType", "budgetPerPerson",
-  "departurePoint", "startTime", "preferredCategories",
+  "departurePoint", "preferredCategories",
   "dietaryRestrictions", "mood",
 ];
+
+function isUserDeparturePoint(v: unknown): v is UserDeparturePoint {
+  return typeof v === "object" && v !== null
+    && typeof (v as { name?: unknown }).name === "string"
+    && typeof (v as { city?: unknown }).city === "string";
+}
 
 function formatValue(v: unknown): string {
   if (v === null || v === undefined || v === "") return "—";
   if (Array.isArray(v)) return v.length === 0 ? "—" : v.join("、");
+  if (isUserDeparturePoint(v)) return v.name;
   return String(v);
 }
 
@@ -208,7 +185,7 @@ export function UserPreferencesPanel() {
       <div style={{
         fontSize: 10, color: "var(--text-dim)", marginBottom: 8, fontFamily: "var(--font-mono)",
       }}>
-        方案 {prefs.stats.totalCompletedPlans} · 预订 {prefs.stats.totalBookings} · {timeAgo(prefs.lastUpdated)} 更新
+        方案 {prefs.stats.totalCompletedPlans} · 预订 {prefs.stats.totalBookings} · {timeAgo(prefs.updatedAt)} 更新
       </div>
 
       {/* Defaults */}
@@ -237,7 +214,7 @@ export function UserPreferencesPanel() {
       )}
 
       {/* Recent intents (collapsible) */}
-      {prefs.recentIntents.length > 0 && (
+      {prefs.recentSessions.length > 0 && (
         <>
           <button
             onClick={() => setExpanded(!expanded)}
@@ -246,17 +223,17 @@ export function UserPreferencesPanel() {
               fontSize: 10, padding: 0, cursor: "pointer", marginTop: 4,
             }}
           >
-            {expanded ? "▼" : "▶"} 最近 {prefs.recentIntents.length} 次需求
+            {expanded ? "▼" : "▶"} 最近 {prefs.recentSessions.length} 次需求
           </button>
           {expanded && (
             <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
-              {prefs.recentIntents.map((intent, i) => (
+              {prefs.recentSessions.map((session, i) => (
                 <div key={i} style={{
                   fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-mono)",
                   padding: "4px 6px", background: "var(--bg)", borderRadius: 4,
                 }}>
-                  {intent.date ?? "—"} · {intent.departurePoint ?? "—"} · {intent.partySize ?? "—"}人
-                  {intent.budgetPerPerson !== undefined && ` · ¥${intent.budgetPerPerson}`}
+                  {session.intent.date ?? "—"} · {session.intent.departurePoint?.name ?? "—"} · {session.intent.partySize ?? "—"}人
+                  {session.intent.budgetPerPerson !== undefined && ` · ¥${session.intent.budgetPerPerson}`}
                 </div>
               ))}
             </div>
