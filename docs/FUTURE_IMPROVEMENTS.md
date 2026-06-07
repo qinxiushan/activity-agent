@@ -51,10 +51,10 @@ SSE 投递 `message_end` / `tool_execution_start` / `tool_execution_end`,plan-st
 
 原始观察:未确认空列表分支 — 工具时间线是显示「暂无工具调用」占位还是直接空渲染?**需要在 `executing` 阶段早期(还没有 tool calls)实际查看一次**。
 
-## 9. 取消 UX  [部分解决]
+## 9. 取消 UX  [已解决]
 
 原始观察:`reset()` 在 hook 里存在,但按钮是否接通不清楚。
-当前状态:`useActivitySession.abort()` 方法已加(commit `18df19c`,`hooks/useActivitySession.ts:253`),通过 `POST /api/agent/[id]` body `{type:"abort"}` 终止 session。**`components/ActivityPanelWrapper.tsx` 未引用 `abort`** — UI 接线待做,用户当前无法取消正在运行的 LLM 任务。
+解决:commit `18df19c` 加了 `useActivitySession.abort()` 方法(hook 内部 `POST /api/agent/[id]` body `{type:"abort"}`),commit `aa04c01` 在 `components/ActivityPanelWrapper.tsx` 头部接线了 "停止" 按钮(local `aborting` state 防双击,颜色 `#ef4444` 与 error banner 一致)。`activity.agentRunning` 为 true 时显示,点击后等 server 发 `agent_end` SSE 事件 → 按钮自动消失。
 
 ---
 
