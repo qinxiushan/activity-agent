@@ -43,6 +43,7 @@ export interface ActivityState {
   planState: ActivityPlanState | null;
   error: string | null;
   planStateError: string | null;
+  sseReconnecting: boolean;
 }
 
 const INITIAL: ActivityState = {
@@ -53,6 +54,7 @@ const INITIAL: ActivityState = {
   planState: null,
   error: null,
   planStateError: null,
+  sseReconnecting: false,
 };
 
 interface RawEvent {
@@ -168,7 +170,10 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
       if (sessionIdRef.current !== sid) return;
       const es = new EventSource(`${serverBase}/api/agent/${encodeURIComponent(sid)}/events`);
       esRef.current = es;
-      es.onopen = () => { reconnectAttemptsRef.current = 0; };
+      es.onopen = () => {
+        reconnectAttemptsRef.current = 0;
+        setState((prev) => prev.sseReconnecting ? { ...prev, sseReconnecting: false } : prev);
+      };
       es.onmessage = (e) => {
         reconnectAttemptsRef.current = 0;
         let ev: RawEvent;
@@ -233,6 +238,7 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
         if (sessionIdRef.current !== sid) return;
         es.close();
         esRef.current = null;
+        setState((prev) => prev.sseReconnecting ? prev : { ...prev, sseReconnecting: true });
         const attempt = reconnectAttemptsRef.current++;
         const delayMs = Math.min(1000 * 2 ** attempt, 30_000);
         reconnectTimerRef.current = setTimeout(connect, delayMs);

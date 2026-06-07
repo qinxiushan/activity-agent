@@ -111,6 +111,22 @@ export function ActivityPanelWrapper() {
               >{aborting ? "停止中" : "停止"}</button>
             </>
           )}
+          {activity.sseReconnecting && (
+            <span
+              title="SSE 连接断开,正在重连…"
+              style={{
+                display: "flex", alignItems: "center", gap: 5, fontSize: 10,
+                color: "rgba(234,179,8,0.95)",
+              }}
+            >
+              <span style={{
+                width: 5, height: 5, borderRadius: "50%",
+                background: "rgba(234,179,8,0.95)",
+                animation: "pulse 1.5s infinite",
+              }} />
+              正在重连…
+            </span>
+          )}
         </div>
       </div>
 
