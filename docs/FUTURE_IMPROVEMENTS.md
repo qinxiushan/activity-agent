@@ -18,9 +18,9 @@
 
 解决:commit `fb814cb` 在 `components/activity/ActivityPanel.tsx` 加 phase-driven 渲染。`idle` 只显示 `PhaseProgress`;`intent_capture` / `clarifying` / `planning` 显示 `PhaseProgress` + `ToolTimeline`;`plan_confirm`+ 全部显示(`BookingCard` 仅在 `hasBooking()` 满足时出现);`cancelled` 暂不纳入(等 §2 单独处理)。噪声面板在早期 phase 自动隐藏,无需用户手动折叠。
 
-## 2. 相位进度条  [未解决]
+## 2. 相位进度条  [已解决]
 
-7 个相位:`idle` / `intent_capture` / `clarifying` / `planning` / `plan_confirm` / `executing` / `completed`。**少了 `cancelled`** —— 被取消的会话没有终止指示(进度条只终止于 `completed`)。
+解决:commit `a87557d` 在 `components/activity/PhaseProgress.tsx` 给 PHASES 加第 8 项 `cancelled`(红色 ✕),并加 `effectiveKey` 逻辑(用 `planState.history` 找最后一个非 cancelled phase,fallback `idle`)驱动 past/current。cancelled 终止指示以红色 connector + 红色 ✕ 单独渲染在 7 个正常 dot 之后,label 也补 "已取消"。底部 description box 原本就有 cancelled 红色样式,保持原状 — 现在 dot 条与描述框视觉一致。
 
 ## 3. 轮询与 SSE 的重叠  [未解决]
 
