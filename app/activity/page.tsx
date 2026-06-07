@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ActivityPanel } from "@/components/activity/ActivityPanel";
+import { UserPreferencesPanel } from "@/components/UserPreferencesPanel";
 import { useActivitySession } from "@/hooks/useActivitySession";
 import { useTheme } from "@/hooks/useTheme";
 
@@ -250,7 +251,10 @@ export default function ActivityPage() {
           {activity.error ? (
             <div style={{ padding: 16, color: "#ef4444", fontSize: 12 }}>错误: {activity.error}</div>
           ) : (
-            <ActivityPanel planState={activity.planState} toolCalls={activity.toolCalls} />
+            <>
+              <UserPreferencesPanel />
+              <ActivityPanel planState={activity.planState} toolCalls={activity.toolCalls} />
+            </>
           )}
         </div>
       </div>
