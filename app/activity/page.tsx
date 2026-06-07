@@ -32,8 +32,8 @@ export default function ActivityPage() {
   const { isDark, toggleTheme } = useTheme();
 
   useEffect(() => {
-    fetch("/api/home").then((r) => r.json()).then((d: { cwd?: string }) => {
-      if (d.cwd) setCwd(d.cwd);
+    fetch("/api/home").then((r) => r.json()).then((d: { home?: string }) => {
+      if (d.home) setCwd(d.home);
     }).catch(() => {});
     fetch("/api/models").then((r) => r.json()).then((d: ModelsResponse) => {
       setModelList(d.modelList);
