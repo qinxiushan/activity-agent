@@ -14,6 +14,31 @@ npm run dev                  # port 30142
 | Real LLM e2e — manual (server must be running) | `npm run e2e:real` |
 | Playwright visual | `npm run test:visual` |
 
+## CI (GitHub Actions)
+
+Workflow file: **`.github/workflows/ci.yml`**
+
+<!-- TODO: replace OWNER/REPO with actual GitHub path after first push -->
+[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+
+Two jobs:
+
+| Job | Triggers | Needs secrets | What it runs | Timeout |
+|---|---|---|---|---|
+| **lint** | every push + PR | ❌ | `tsc --noEmit` + `npm run test:smoke` | 5 min |
+| **e2e** | push to `main` + manual dispatch | ✅ `DEEPSEEK_API_KEY` | full LLM e2e (auto-starts dev server) | 10 min |
+
+**Setup after first `git push`**:
+
+1. Go to repo **Settings → Secrets and variables → Actions**
+2. Click **New repository secret**
+3. Name: `DEEPSEEK_API_KEY`, Value: your `sk-...` from https://platform.deepseek.com
+4. Done — next push to main will run e2e automatically
+
+**Swap provider**: edit `.github/workflows/ci.yml` lines 76-83 (`Write deepseek config` step) and the `env:` block above. Pattern is identical for any built-in provider (see [`docs/MODEL_CONFIG.md`](docs/MODEL_CONFIG.md) §实战 2).
+
+**Save API credits on PRs**: e2e is intentionally gated to `push` events on `main` + manual `workflow_dispatch`. PRs only run `lint`. Use **Actions → CI → Run workflow** to force an e2e on a PR branch.
+
 ## Model Configuration — 3 Files, Not 1
 
 **改错了文件 = 改半天 LLM 没反应。** LLM 模型配置分布在 3 个文件里（不是 1 个）：

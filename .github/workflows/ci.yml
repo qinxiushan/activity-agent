@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-progress runs of the same workflow on the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # Job 1: Lint + Typecheck + Smoke (fast, no secrets, always runs)
+  # ─────────────────────────────────────────────────────────────────────
+  lint:
+    name: Typecheck + Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: node_modules/.bin/tsc --noEmit
+
+      - name: Unit + integration smoke
+        run: npm run test:smoke
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Job 2: Real LLM E2E (slow, needs API key, main-only + manual)
+  #
+  # Triggers:
+  #   - push to main:  catches regressions on merges
+  #   - workflow_dispatch:  manual re-run from GitHub UI
+  #   - NOT pull_request:  saves API credits (use workflow_dispatch to
+  #     force a run on a PR if needed)
+  #
+  # Required secret:
+  #   - DEEPSEEK_API_KEY  (https://platform.deepseek.com)
+  #
+  # To swap providers, change the JSON below to match any other
+  # pi-coding-agent built-in provider. See docs/MODEL_CONFIG.md.
+  # ─────────────────────────────────────────────────────────────────────
+  e2e:
+    name: Real LLM E2E (deepseek)
+    runs-on: ubuntu-latest
+    needs: lint
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 10
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install jq (for safe JSON construction)
+        run: sudo apt-get update -qq && sudo apt-get install -y jq
+
+      - name: Write deepseek config (~/.pi/agent/{settings,auth}.json)
+        run: |
+          mkdir -p ~/.pi/agent
+          cat > ~/.pi/agent/settings.json <<'EOF'
+          {
+            "defaultProvider": "deepseek",
+            "defaultModel": "deepseek-v4-flash",
+            "defaultThinkingLevel": "high"
+          }
+          EOF
+          jq -n --arg key "$DEEPSEEK_API_KEY" \
+            '{deepseek: {type: "api_key", key: $key}}' > ~/.pi/agent/auth.json
+          chmod 600 ~/.pi/agent/auth.json
+          echo "Config written:"
+          cat ~/.pi/agent/settings.json
+          echo "---"
+          stat -c '%a %n' ~/.pi/agent/auth.json
+
+      - name: Run e2e (auto-starts dev server + runs test + cleans up)
+        run: npm run e2e
