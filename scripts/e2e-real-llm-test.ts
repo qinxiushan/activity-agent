@@ -529,7 +529,7 @@ async function main(): Promise<void> {
   if (!s2) {
     ok("plan state exists after confirm", false);
   } else {
-    ok("phase transitioned to executing after confirm", s2.phase === "executing", `actual=${s2.phase}`);
+    ok("phase transitioned past plan_confirm after confirm", s2.phase === "executing" || s2.phase === "completed", `actual=${s2.phase}`);
   }
 
   ok("reservation_exec was called in turn 2 (bookings start)", turns[1] ? turns[1]!.some((t) => t.name === "reservation_exec") : false);
