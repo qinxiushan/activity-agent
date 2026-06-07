@@ -22,9 +22,18 @@
 
 解决:commit `a87557d` 在 `components/activity/PhaseProgress.tsx` 给 PHASES 加第 8 项 `cancelled`(红色 ✕),并加 `effectiveKey` 逻辑(用 `planState.history` 找最后一个非 cancelled phase,fallback `idle`)驱动 past/current。cancelled 终止指示以红色 connector + 红色 ✕ 单独渲染在 7 个正常 dot 之后,label 也补 "已取消"。底部 description box 原本就有 cancelled 红色样式,保持原状 — 现在 dot 条与描述框视觉一致。
 
-## 3. 轮询与 SSE 的重叠  [未解决]
+## 3. 轮询与 SSE 的重叠  [已解决]
 
-SSE 投递 `message_end` / `tool_execution_start` / `tool_execution_end`,plan-state 1.5s 轮询读到的内容大部分 SSE 事件也覆盖了。**轮询可能冗余**,但目前仍作为 SSE 断开时的兜底保留(有用但可能过度)。
+调查完成(读 4 个文件:`app/api/agent/[id]/events/route.ts` / `app/api/plan-state/[id]/route.ts` / `lib/plan-state.ts` / `lib/rpc-manager.ts`):
+
+**两个数据源没有重叠**:
+- SSE 转发 `pi-coding-agent` AgentSession 事件:`agent_start` / `agent_end` / `message_end` / `tool_execution_start` / `tool_execution_end`(流式 / sub-second 延迟)
+- 轮询读 `~/.pi/agent/plan-states/<id>.json`,内容是 `phase` / `turnCount` / `intent` / `plan` / `history` — 这些是 SOP-v2 自定义状态(`PlanStateManager` 在 `lib/plan-state.ts`),不在 pi-coding-agent 内部
+- phase 转变在 `AgentSessionWrapper.advancePlanPhase()`(`lib/rpc-manager.ts`:113)里发生,持久化到 disk,polling 是 client 拿到的唯一通道
+
+**结论**: 轮询**不冗余**,是 SOP-v2 状态机的唯一传输通道。
+
+**优化机会**(留作 future work,本次不实施): 1.5s 常量轮询在 idle 时浪费。`useActivitySession` 已通过 SSE `agent_start`/`agent_end` 维护 `agentRunning` state,`startPlanPoll`(`hooks/useActivitySession.ts`:108)可改为自适应 — `agentRunning=true` 时 1.5s(LLM 可能正在改 phase),`agentRunning=false` 时 5s 或停止,终态(completed/cancelled)持续 >5s 后停止。
 
 ## 4. UI 中看不到用户身份  [已解决]
 
