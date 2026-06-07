@@ -1419,6 +1419,25 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
         </div>
 
+        {/* Info banner — clarifies which file this UI edits vs. where to change default/key */}
+        <div style={{
+          flexShrink: 0,
+          padding: "10px 18px",
+          background: "color-mix(in srgb, var(--accent) 6%, transparent)",
+          borderBottom: "1px solid var(--border)",
+          fontSize: 12, lineHeight: 1.5,
+          color: "var(--text-muted)",
+        }}>
+          <div style={{ fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>
+            ℹ️ 此弹窗只编辑 <code style={{ fontFamily: "var(--font-mono)" }}>models.json</code>（自定义 provider / 微调模型用）
+          </div>
+          <div>
+            改 <strong>默认模型</strong>（<code style={{ fontFamily: "var(--font-mono)" }}>defaultProvider</code> / <code style={{ fontFamily: "var(--font-mono)" }}>defaultModel</code>）→ 顶部模型下拉或编辑 <code style={{ fontFamily: "var(--font-mono)" }}>settings.json</code>；
+            改 <strong>API key</strong> → 左侧栏选 provider → <em>Disconnect</em> → 重新填（写入 <code style={{ fontFamily: "var(--font-mono)" }}>auth.json</code>）。
+            详见 <code style={{ fontFamily: "var(--font-mono)" }}>docs/MODEL_CONFIG.md</code>。
+          </div>
+        </div>
+
         {/* Body */}
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
 
