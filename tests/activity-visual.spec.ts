@@ -85,7 +85,7 @@ test.describe("User Preferences Panel", () => {
   test("renders empty-state when no prefs exist", async ({ page }) => {
     await page.goto("/activity");
     await expect(page.locator("text=Activity Panel")).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator("text=🧠 用户偏好")).toBeVisible();
+    await expect(page.locator("text=用户偏好")).toBeVisible();
     await expect(page.locator("text=/方案 \\d+ · 预订 \\d+/")).toBeVisible();
     const placeholder = page.locator("text=暂无偏好").first();
     await expect(placeholder).toBeVisible();
@@ -95,7 +95,7 @@ test.describe("User Preferences Panel", () => {
 
   test("refresh button triggers /api/user-preferences POST and re-renders", async ({ page }) => {
     await page.goto("/activity");
-    await expect(page.locator("text=🧠 用户偏好")).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("text=用户偏好")).toBeVisible({ timeout: 10_000 });
     const refreshBtn = page.locator('button[title*="重新计算"]');
     const reqPromise = page.waitForRequest(
       (r) => r.url().endsWith("/api/user-preferences") && r.method() === "POST",
@@ -104,16 +104,16 @@ test.describe("User Preferences Panel", () => {
     await refreshBtn.click();
     const req = await reqPromise;
     expect(req.postDataJSON()).toEqual({ action: "refresh" });
-    await expect(page.locator("text=🧠 用户偏好")).toBeVisible();
+    await expect(page.locator("text=用户偏好")).toBeVisible();
   });
 
   test("panel renders in dark mode without contrast issues", async ({ page }) => {
     await page.goto("/activity");
-    await expect(page.locator("text=🧠 用户偏好")).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("text=用户偏好")).toBeVisible({ timeout: 10_000 });
     await page.locator('button[aria-label="Switch to dark mode"]').click();
     await page.waitForFunction(() => document.documentElement.classList.contains("dark"));
     await page.waitForTimeout(300);
-    await expect(page.locator("text=🧠 用户偏好")).toBeVisible();
+    await expect(page.locator("text=用户偏好")).toBeVisible();
     await page.screenshot({
       path: join(SCREENSHOT_DIR, "prefs-panel-dark.png"),
       fullPage: true,
@@ -122,7 +122,7 @@ test.describe("User Preferences Panel", () => {
 
   test("expandable recent-intents section toggles", async ({ page }) => {
     await page.goto("/activity");
-    await expect(page.locator("text=🧠 用户偏好")).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("text=用户偏好")).toBeVisible({ timeout: 10_000 });
     const toggle = page.locator('button:has-text("最近")').first();
     const exists = await toggle.count();
     if (exists > 0) {

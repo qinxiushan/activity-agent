@@ -4,10 +4,10 @@ import type { ActivityPlanState } from "@/hooks/useActivitySession";
 
 const PHASES = [
   { key: "idle", label: "待命", icon: "○" },
-  { key: "intent_capture", label: "意图捕获", icon: "✎" },
+  { key: "intent_capture", label: "意图捕获", icon: "" },
   { key: "clarifying", label: "追问", icon: "?" },
-  { key: "planning", label: "自动规划", icon: "⚙" },
-  { key: "plan_confirm", label: "等待确认", icon: "★" },
+  { key: "planning", label: "自动规划", icon: "" },
+  { key: "plan_confirm", label: "等待确认", icon: "" },
   { key: "executing", label: "执行预订", icon: "→" },
   { key: "completed", label: "完成", icon: "✓" },
 ] as const;

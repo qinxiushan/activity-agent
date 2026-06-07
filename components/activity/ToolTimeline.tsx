@@ -3,18 +3,18 @@
 import type { ActivityToolCall } from "@/hooks/useActivitySession";
 
 const TOOL_ICONS: Record<string, string> = {
-  intent_parse: "✎",
+  intent_parse: "IP",
   ask_clarification: "?",
-  get_weather: "🌤",
-  search_activities: "🔍",
-  search_restaurants: "🍴",
-  check_opening_hours: "🕐",
-  compute_route: "🚇",
-  reservation_exec: "📋",
-  query_booking: "📊",
-  retry_booking: "🔁",
-  plan_save: "💾",
-  plan_load: "📂",
+  get_weather: "GW",
+  search_activities: "SA",
+  search_restaurants: "SR",
+  check_opening_hours: "CH",
+  compute_route: "CR",
+  reservation_exec: "RE",
+  query_booking: "QB",
+  retry_booking: "RB",
+  plan_save: "PS",
+  plan_load: "PL",
 };
 
 const TOOL_COLORS: Record<string, string> = {

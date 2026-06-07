@@ -12,7 +12,6 @@ export interface WeatherForecast {
   city: string;
   date: string;
   condition: WeatherCondition;
-  emoji: string;
   description: string;
   tempMax: number;
   tempMin: number;
@@ -24,13 +23,13 @@ export interface WeatherForecast {
 
 const CONDITION_POOL: WeatherCondition[] = ["sunny", "cloudy", "rainy", "sunny", "cloudy", "hot", "sunny", "rainy", "cloudy", "snowy"];
 
-const CONDITION_META: Record<WeatherCondition, { emoji: string; description: string; outdoor: boolean }> = {
-  sunny: { emoji: "☀️", description: "晴", outdoor: true },
-  cloudy: { emoji: "⛅", description: "多云", outdoor: true },
-  rainy: { emoji: "🌧️", description: "雨", outdoor: false },
-  snowy: { emoji: "❄️", description: "雪", outdoor: false },
-  hot: { emoji: "🔥", description: "高温 (>35°C)", outdoor: false },
-  cold: { emoji: "🥶", description: "低温 (<5°C)", outdoor: false },
+const CONDITION_META: Record<WeatherCondition, { description: string; outdoor: boolean }> = {
+  sunny: { description: "晴", outdoor: true },
+  cloudy: { description: "多云", outdoor: true },
+  rainy: { description: "雨", outdoor: false },
+  snowy: { description: "雪", outdoor: false },
+  hot: { description: "高温 (>35°C)", outdoor: false },
+  cold: { description: "低温 (<5°C)", outdoor: false },
 };
 
 function dateToSeed(date: string): number {
@@ -62,7 +61,6 @@ function generateWeather(city: string, date: string): WeatherForecast {
     city,
     date,
     condition: cond,
-    emoji: meta.emoji,
     description: meta.description,
     tempMax,
     tempMin,

@@ -145,7 +145,7 @@ export function UserPreferencesPanel() {
           fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase",
           letterSpacing: 0.6, fontWeight: 600,
         }}>
-          🧠 用户偏好
+          用户偏好
           <span style={{
             fontSize: 9, fontWeight: 400, fontFamily: "var(--font-mono)",
             textTransform: "none", letterSpacing: 0, opacity: 0.7,
@@ -164,7 +164,7 @@ export function UserPreferencesPanel() {
               opacity: busy === "refresh" ? 0.5 : 1,
             }}
           >
-            {busy === "refresh" ? "…" : "🔄 刷新"}
+            {busy === "refresh" ? "…" : "刷新"}
           </button>
           <button
             onClick={() => void reset()}
@@ -176,7 +176,7 @@ export function UserPreferencesPanel() {
               opacity: busy === "reset" ? 0.5 : 1,
             }}
           >
-            🗑️
+            重置
           </button>
         </div>
       </div>

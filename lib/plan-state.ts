@@ -5,7 +5,7 @@
  *   1. 用户输入 → intent_capture（结构化提取）
  *   2. 关键字段缺失？→ 追问 1 次（clarifying）→ 必须用默认值推进
  *   3. planning（自动）：LLM 调 weather/POI/route/opening-hours 工具，无需用户
- *   4. plan_confirm ⭐ 唯一用户确认点（确认/修改/重新生成）
+ *   4. plan_confirm 唯一用户确认点（确认/修改/重新生成）
  *   5. executing（真实预订）
  *   6. completed
  *

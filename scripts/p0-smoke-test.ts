@@ -68,15 +68,15 @@ async function main() {
   log("Shanghai chinese cuisine", shChinese.length > 0);
 
   // ─── 新服务：天气 ─────────────────────────────────────
-  section("🌤 Weather Service");
+  section("Weather Service");
   const w = getWeather("北京", "2026-07-15");
-  log("Has emoji + condition", !!w.emoji && !!w.condition, `${w.emoji} ${w.description}`);
+  log("Has condition + description", !!w.condition && !!w.description, `${w.condition} ${w.description}`);
   log("Has temp range", w.tempMax > w.tempMin, `${w.tempMin}–${w.tempMax}°C`);
   log("Has advice string", w.advice.length > 0, w.advice);
   log("Has suitableForOutdoor", typeof w.suitableForOutdoor === "boolean");
 
   // ─── 新服务：通勤 ─────────────────────────────────────
-  section("🚇 Route Service");
+  section("Route Service");
   const from = { id: "departure", name: "三里屯", lng: 116.453, lat: 39.937 };
   const to = { id: "798", name: "798", lng: 116.497, lat: 39.984 };
   const r = computeRoute(from, to);

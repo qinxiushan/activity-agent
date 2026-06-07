@@ -97,7 +97,7 @@ export function BookingCard({ toolCalls, planState }: { toolCalls: ActivityToolC
       </div>
 
       <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>
-        🍴 {booking.restaurantName}
+        {booking.restaurantName}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 11, color: "var(--text-muted)" }}>

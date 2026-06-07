@@ -3,11 +3,11 @@
 import type { ActivityPlanState } from "@/hooks/useActivitySession";
 
 const TYPE_ICONS: Record<string, string> = {
-  departure: "🚌",
-  transit: "🚇",
-  activity: "🎯",
-  meal: "🍴",
-  rest: "☕",
+  departure: "D",
+  transit: "T",
+  activity: "A",
+  meal: "M",
+  rest: "R",
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -107,9 +107,9 @@ export function PlanTimeline({ planState }: { planState: ActivityPlanState | nul
         display: "flex", gap: 12, marginTop: 8, paddingTop: 10,
         borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--text-muted)",
       }}>
-        <span>⏱ {Math.floor(plan.totalDurationMinutes / 60)}h{plan.totalDurationMinutes % 60}m</span>
-        <span>💰 ¥{plan.totalCost}/人</span>
-        <span>📍 {plan.timeline.length} 段</span>
+        <span>总时长 {Math.floor(plan.totalDurationMinutes / 60)}h{plan.totalDurationMinutes % 60}m</span>
+        <span>人均 ¥{plan.totalCost}</span>
+        <span>{plan.timeline.length} 段</span>
       </div>
     </div>
   );

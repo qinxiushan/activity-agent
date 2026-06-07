@@ -61,7 +61,7 @@ export default function ActivityPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <a href="/" style={{ color: "var(--text-muted)", textDecoration: "none", fontSize: 18 }}>←</a>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>🎯 Activity Agent</div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>Activity Agent</div>
               <div style={{ fontSize: 10, color: "var(--text-dim)" }}>SOP-v2 活动规划 · 单次确认 + 1 次追问</div>
             </div>
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
@@ -123,7 +123,6 @@ export default function ActivityPage() {
         <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
           {activity.messages.length === 0 && !activity.sessionId && (
             <div style={{ textAlign: "center", color: "var(--text-dim)", padding: "60px 20px" }}>
-              <div style={{ fontSize: 32, marginBottom: 12 }}>🎯</div>
               <div style={{ fontSize: 14, color: "var(--text-muted)", marginBottom: 6 }}>开始一个活动规划</div>
               <div style={{ fontSize: 11 }}>输入需求并发送，右侧面板实时显示 SOP 阶段 + 工具调用 + 方案时间线</div>
             </div>
