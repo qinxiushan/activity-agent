@@ -5,21 +5,21 @@
  * PUT    /api/user-preferences       — manually edit defaults (partial)
  * POST   /api/user-preferences       — action=refresh → re-derive from history
  *
- * v1: single user "default" (no auth, no user switcher)
+ * v2: userId derived from os.userInfo().username; ?userId= or body.userId overrides
  */
 
 import { NextResponse } from "next/server";
 import {
   getUserPreferencesStore,
-  DEFAULT_USER_ID,
   type UserPreferencesDefaults,
 } from "@/lib/user-preferences";
+import { getCurrentUserId } from "@/lib/user-context";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request): Promise<NextResponse> {
   const url = new URL(req.url);
-  const userId = url.searchParams.get("userId") ?? DEFAULT_USER_ID;
+  const userId = url.searchParams.get("userId") ?? getCurrentUserId();
   const store = getUserPreferencesStore(userId);
   const prefs = await store.load();
   return NextResponse.json({ preferences: prefs });
@@ -32,7 +32,7 @@ export async function PUT(req: Request): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
-  const userId = body.userId ?? DEFAULT_USER_ID;
+  const userId = body.userId ?? getCurrentUserId();
   if (!body.defaults || typeof body.defaults !== "object") {
     return NextResponse.json({ error: "missing_defaults" }, { status: 400 });
   }
@@ -48,7 +48,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
-  const userId = body.userId ?? DEFAULT_USER_ID;
+  const userId = body.userId ?? getCurrentUserId();
   const action = body.action;
   const store = getUserPreferencesStore(userId);
 
