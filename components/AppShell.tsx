@@ -83,6 +83,10 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
   }, [activeTopPanel]);
 
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [rightPanelWidth, setRightPanelWidth] = useState(420);
+  const isResizingRef = useRef(false);
+  const resizeStartXRef = useRef(0);
+  const resizeStartWidthRef = useRef(0);
 
   const [identity, setIdentity] = useState<{ userId: string; isDev: boolean } | null>(null);
   useEffect(() => {
@@ -94,6 +98,36 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
         }
       })
       .catch(() => {});
+  }, []);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizingRef.current = true;
+    resizeStartXRef.current = e.clientX;
+    resizeStartWidthRef.current = rightPanelWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [rightPanelWidth]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      const delta = resizeStartXRef.current - e.clientX;
+      const next = Math.max(280, Math.min(800, resizeStartWidthRef.current + delta));
+      setRightPanelWidth(next);
+    };
+    const handleMouseUp = () => {
+      if (!isResizingRef.current) return;
+      isResizingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
   }, []);
 
   const handleAtMention = useCallback((relativePath: string) => {
@@ -624,19 +658,34 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
 
       {/* Right panel: ActivityPanelWrapper (or placeholder) — always mounted, width animated via CSS */}
       {rightPanel && (
-        <div
-          className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            borderLeft: "1px solid var(--border)",
-            background: "var(--bg)",
-          }}
-        >
-          <div style={{ flex: 1, overflow: "hidden" }}>
-            {rightPanel}
+        <>
+          <div
+            onMouseDown={handleResizeStart}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--accent)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            title="拖动调整宽度"
+            style={{
+              width: 6, alignSelf: "stretch", flexShrink: 0,
+              cursor: "col-resize", background: "transparent",
+              position: "relative", zIndex: 1, marginRight: -3,
+              transition: "background 0.12s",
+            }}
+          />
+          <div
+            className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              width: rightPanelWidth,
+              borderLeft: "1px solid var(--border)",
+              background: "var(--bg)",
+            }}
+          >
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              {rightPanel}
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
