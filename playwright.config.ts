@@ -1,7 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * Playwright config — visual regression for /activity page.
+ * Playwright config — visual regression for the activity panel
+ * (right side of the home page, 3-column layout).
  *
  * Pre-req: dev server must be running on the configured port.
  * Run:    npm run test:visual
