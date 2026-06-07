@@ -164,10 +164,17 @@ export function UserPreferencesPanel() {
         display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8,
       }}>
         <div style={{
+          display: "flex", alignItems: "center", gap: 6,
           fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase",
           letterSpacing: 0.6, fontWeight: 600,
         }}>
           🧠 用户偏好
+          <span style={{
+            fontSize: 9, fontWeight: 400, fontFamily: "var(--font-mono)",
+            textTransform: "none", letterSpacing: 0, opacity: 0.7,
+          }} title="当前 prefs 归属的 userId">
+            {prefs.userId}
+          </span>
         </div>
         <div style={{ display: "flex", gap: 4 }}>
           <button
