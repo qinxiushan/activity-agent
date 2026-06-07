@@ -1,17 +1,19 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, type ReactNode } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
+import { ActivityPanelWrapper } from "./ActivityPanelWrapper";
 import { ModelsConfig } from "./ModelsConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { BranchNavigator } from "./BranchNavigator";
 import { useTheme } from "@/hooks/useTheme";
+import { useActivitySession } from "@/hooks/useActivitySession";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 
-export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
+export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isDark, toggleTheme } = useTheme();
@@ -87,6 +89,8 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
   const isResizingRef = useRef(false);
   const resizeStartXRef = useRef(0);
   const resizeStartWidthRef = useRef(0);
+
+  const activity = useActivitySession();
 
   const [identity, setIdentity] = useState<{ userId: string; isDev: boolean } | null>(null);
   useEffect(() => {
@@ -164,25 +168,24 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
   }, [router]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
+    activity.reset();
     setNewSessionCwd(null);
     setSelectedSession(session);
     setSessionKey((k) => k + 1);
     setSystemPrompt(null);
     setInitialSessionRestored(true);
+    activity.trackSession(session.id);
     if (isRestore) {
-      // Suppress the redundant sessionKey bump that would come from the
-      // onCwdChange effect firing after setSelectedCwd in the sidebar
       suppressCwdBumpRef.current = true;
       setTimeout(() => { suppressCwdBumpRef.current = false; }, 0);
     }
-    // Skip router.replace when restoring from URL — the param is already correct
-    // and calling replace in production Next.js triggers a Suspense remount loop
     if (!isRestore) {
       router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
     }
-  }, [router]);
+  }, [router, activity]);
 
   const handleNewSession = useCallback((_sessionId: string, cwd: string) => {
+    activity.reset();
     setSelectedSession(null);
     setNewSessionCwd(cwd);
     setSessionKey((k) => k + 1);
@@ -191,15 +194,16 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
     setSystemPrompt(null);
     setActiveTopPanel(null);
     router.replace("/", { scroll: false });
-  }, [router]);
+  }, [router, activity]);
 
   // Called by ChatWindow when a new session gets its real id from pi
   const handleSessionCreated = useCallback((session: SessionInfo) => {
+    activity.trackSession(session.id);
     setNewSessionCwd(null);
     setSelectedSession(session);
     setRefreshKey((k) => k + 1);
     router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
-  }, [router]);
+  }, [router, activity]);
 
   const handleAgentEnd = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -656,37 +660,46 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
         </div>
       </div>
 
-      {/* Right panel: ActivityPanelWrapper (or placeholder) — always mounted, width animated via CSS */}
-      {rightPanel && (
-        <div style={{ display: rightPanelOpen ? "flex" : "none" }}>
-          <div
-            onMouseDown={handleResizeStart}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--accent)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-            title="拖动调整宽度"
-            style={{
-              width: 6, alignSelf: "stretch", flexShrink: 0,
-              cursor: "col-resize", background: "transparent",
-              position: "relative", zIndex: 1, marginRight: -3,
-              transition: "background 0.12s",
-            }}
-          />
-          <div
-            className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              width: rightPanelWidth,
-              borderLeft: "1px solid var(--border)",
-              background: "var(--bg)",
-            }}
-          >
-            <div style={{ flex: 1, overflow: "hidden" }}>
-              {rightPanel}
-            </div>
+      {/* Right panel: ActivityPanelWrapper — always mounted */}
+      <div style={{ display: rightPanelOpen ? "flex" : "none" }}>
+        <div
+          onMouseDown={handleResizeStart}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--accent)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+          title="拖动调整宽度"
+          style={{
+            width: 6, alignSelf: "stretch", flexShrink: 0,
+            cursor: "col-resize", background: "transparent",
+            position: "relative", zIndex: 1, marginRight: -3,
+            transition: "background 0.12s",
+          }}
+        />
+        <div
+          className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            width: rightPanelWidth,
+            borderLeft: "1px solid var(--border)",
+            background: "var(--bg)",
+          }}
+        >
+          <div style={{ flex: 1, overflow: "hidden" }}>
+            <ActivityPanelWrapper
+              sessionId={activity.sessionId}
+              planState={activity.planState}
+              toolCalls={activity.toolCalls}
+              planStateError={activity.planStateError}
+              sseReconnecting={activity.sseReconnecting}
+              error={activity.error}
+              agentRunning={activity.agentRunning}
+              reset={activity.reset}
+              abort={activity.abort}
+              retryPlanPoll={activity.retryPlanPoll}
+            />
           </div>
         </div>
-      )}
+      </div>
     </div>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {skillsConfigOpen && (activeCwd ?? selectedSession?.cwd ?? newSessionCwd) && (
