@@ -131,6 +131,7 @@ app/api/
   models/route.ts                 GET { models, modelList, defaultModel }
   models-config/route.ts          GET/POST — read/write ~/.pi/agent/models.json
   user-preferences/route.ts       GET/PUT/POST — read/edit/refresh user preference memory
+  dev-login/route.ts              GET/POST/DELETE — set/clear pi_user cookie (dev-only)
 
 app/
   layout.tsx            Root layout, dark/light theme bootstrap
@@ -157,8 +158,10 @@ lib/
                            + autoFillIntent() called by intent_parse when critical
                            fields are missing; recordCompletedSession() called by
                            plan_save on phase → completed
-  user-context.ts          OS-derived userId resolution (os.userInfo().username;
-                           fallback to DEFAULT_USER_ID); used by API routes + tools
+  user-context.ts          userId resolution: X-User-Id header > pi_user cookie >
+                           os.userInfo().username > DEFAULT_USER_ID;
+                           getCurrentUserId() for tools (no req context),
+                           getCurrentUserIdFromRequest(req) for API routes
   session-reader.ts        parse .jsonl; getModelList/getDefaultModel
   types.ts                 shared TypeScript types
   normalize.ts             normalizeToolCalls()

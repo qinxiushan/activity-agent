@@ -45,7 +45,7 @@ Out of scope for the current milestone:
 
 - **Real API integration** (高德/和风/大众点评) — mock services work but are deterministic. Needs API keys + ¥ + production hardening.
 - **Multi-day trip support** — current SOP is single-day. State machine would need extension.
-- **Production auth / rate limiting** — dev server only, no auth, no rate limits. v2 userId is OS-derived (`os.userInfo().username` → same OS user shares prefs/orders, different OS users are isolated). Full multi-user via auth is still TODO.
+- **Production auth / rate limiting** — dev server only, no rate limits. v3 userId: X-User-Id header > pi_user cookie > `os.userInfo().username` (cookie set/cleared via `/api/dev-login` — NOT real auth, no password/token). For production, replace with proper auth.
 - **i18n** — UI is Chinese-only, prompt is Chinese-only.
 - **Cost / metrics dashboard** — token usage is collected but not surfaced in the UI.
 - **Hard-constraint enforcement** — current constraints (date, budget, party size) are in the prompt. A future "hard mode" should put them in `PlanStateManager` as gates that block `plan_save` if violated.
@@ -70,9 +70,10 @@ Out of scope for the current milestone:
 | LLM prompt | `src/prompts/activity-planner.ts` |
 | Session orchestration (agent start, advancePlanPhase) | `lib/rpc-manager.ts` |
 | User-preference memory (auto-fill + record) | `lib/user-preferences.ts` |
-| User-context (OS-derived userId resolution) | `lib/user-context.ts` |
+| User-context (header/cookie/OS userId chain) | `lib/user-context.ts` |
 | API for plan state (UI polling) | `app/api/plan-state/[id]/route.ts` |
 | API for user preferences (GET/PUT/refresh/reset) | `app/api/user-preferences/route.ts` |
+| API for dev login (set/clear pi_user cookie) | `app/api/dev-login/route.ts` |
 | Activity UI page | `app/activity/page.tsx` |
 | Activity panel components | `components/activity/*.tsx` |
 | User-preferences panel | `components/UserPreferencesPanel.tsx` |
