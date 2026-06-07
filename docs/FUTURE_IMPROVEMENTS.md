@@ -14,9 +14,9 @@
 
 ---
 
-## 1. 信息密度  [未解决]
+## 1. 信息密度  [已解决]
 
-右栏始终显示全部 4 个子面板。在 `intent_capture` 阶段(还没计划、没工具、没预订),用户会看到 3 个空/占位面板 + 相位条。**可按面板折叠**(或基于相位切换的单面板)能降低噪声。
+解决:commit `fb814cb` 在 `components/activity/ActivityPanel.tsx` 加 phase-driven 渲染。`idle` 只显示 `PhaseProgress`;`intent_capture` / `clarifying` / `planning` 显示 `PhaseProgress` + `ToolTimeline`;`plan_confirm`+ 全部显示(`BookingCard` 仅在 `hasBooking()` 满足时出现);`cancelled` 暂不纳入(等 §2 单独处理)。噪声面板在早期 phase 自动隐藏,无需用户手动折叠。
 
 ## 2. 相位进度条  [未解决]
 
@@ -34,14 +34,15 @@ SSE 投递 `message_end` / `tool_execution_start` / `tool_execution_end`,plan-st
 
 错误现在以 banner 形式渲染在消息列表上方(早期修复)。但 **plan-state 轮询** 或 **preferences 轮询**(若端点 500)的错误**没有暴露** —— 只在 console。SSE 重连是静默的。加个「正在重连…」指示器能帮用户理解停顿。
 
-## 6. 相位 ↔ 面板的映射  [未解决]
+## 6. 相位 ↔ 面板的映射  [已解决]
 
-右栏的 4 个区段并不总与当前相位对齐:
-- `PlanTimeline` 只在 `plan_confirm`+ 有用,但始终显示
-- `ToolTimeline` 只在 `executing` 有用,但始终显示
-- `BookingCard` 只在 `reservation_exec` 之后有用,但始终显示
+解决:commit `fb814cb` 给每个面板加显式的「相关 phase 集合」:
+- `PhaseProgress`: 始终显示(总指示器)
+- `ToolTimeline`: `TOOL_VISIBLE_PHASES`(`intent_capture` / `clarifying` / `planning` / `plan_confirm` / `executing` / `completed`)
+- `PlanTimeline`: `PLAN_VISIBLE_PHASES`(`plan_confirm` / `executing` / `completed`,plan 已生成)
+- `BookingCard`: 数据驱动 — `hasBooking()` 返回 true 时显示(任一 `reservation_exec` / `query_booking` tool call `ok && endedAt !== null`)
 
-基于相位的布局(显示/隐藏 或 展开/折叠)能让当前状态更易读。
+`cancelled` 暂不纳入(等 §2 单独处理)。
 
 ## 7. 硬编码 SAMPLE_PROMPTS  [已解决]
 
