@@ -200,3 +200,9 @@ export interface RpcSessionState {
   sessionName?: string;
   messageCount: number;
 }
+
+export interface SkillSearchResult {
+  package: string;
+  installs: string;
+  url: string;
+}

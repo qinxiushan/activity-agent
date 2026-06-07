@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { SkillSearchResult } from "@/app/api/skills/search/route";
+import type { SkillSearchResult } from "@/lib/types";
+
+const STUBS_DISABLED = true;
 
 interface Skill {
   name: string;
@@ -202,6 +204,10 @@ function AddSkillPanel({
 
   const search = useCallback(async (q: string) => {
     if (!q.trim()) return;
+    if (STUBS_DISABLED) {
+      setSearchError("Skill search is not supported in activity-agent");
+      return;
+    }
     setSearching(true);
     setSearchError(null);
     setResults([]);
@@ -230,6 +236,10 @@ function AddSkillPanel({
 
   const install = useCallback(
     async (pkg: string) => {
+      if (STUBS_DISABLED) {
+        setInstallError("Skill install is not supported in activity-agent");
+        return;
+      }
       setInstalling(pkg);
       setInstallError(null);
       try {
@@ -522,6 +532,12 @@ export function SkillsConfig({
   const [addMode, setAddMode] = useState(false);
 
   const loadSkills = useCallback(() => {
+    if (STUBS_DISABLED) {
+      setSkills([]);
+      setError("Skills management is not supported in activity-agent");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     fetch(`/api/skills?cwd=${encodeURIComponent(cwd)}`)
@@ -544,6 +560,10 @@ export function SkillsConfig({
   }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = useCallback(async (skill: Skill) => {
+    if (STUBS_DISABLED) {
+      setSaveError("Skill toggle is not supported in activity-agent");
+      return;
+    }
     const next = !skill.disableModelInvocation;
     setToggling((s) => new Set(s).add(skill.filePath));
     setSaveError(null);

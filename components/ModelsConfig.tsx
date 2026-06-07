@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+
+const STUBS_DISABLED = true;
+
 // Color icons (have their own fill colors — no background needed)
 import AnthropicIcon from "@lobehub/icons/es/Anthropic/components/Mono";
 import OpenAIIcon from "@lobehub/icons/es/OpenAI/components/Mono";
@@ -524,6 +527,13 @@ function ModelDetail({
 
   const handleTest = useCallback(async () => {
     if (!model.id.trim() || testState.phase === "testing") return;
+    if (STUBS_DISABLED) {
+      setTestState({
+        phase: "error",
+        message: "Model testing is not supported in activity-agent",
+      });
+      return;
+    }
     setTestState({ phase: "testing" });
     try {
       const res = await fetch("/api/models-config/test", {
@@ -1237,6 +1247,7 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const loadOAuthProviders = useCallback(() => {
+    if (STUBS_DISABLED) return;
     fetch("/api/auth/providers")
       .then((r) => r.json())
       .then((d: { providers: OAuthProvider[] }) => setOauthProviders(d.providers))
@@ -1244,6 +1255,7 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
   }, []);
 
   const loadApiKeyProviders = useCallback(() => {
+    if (STUBS_DISABLED) return;
     fetch("/api/auth/all-providers")
       .then((r) => r.json())
       .then((d: { providers: ApiKeyProvider[] }) => setApiKeyProviders(d.providers))
