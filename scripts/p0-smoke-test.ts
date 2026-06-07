@@ -29,6 +29,10 @@ import { wrapToolWithResilience, getRecentMetrics, clearMetrics, recordToolMetri
 import { getWeather } from "../lib/weather-service";
 import { computeRoute, buildRouteChain, haversineMeters } from "../lib/route-service";
 import { isOpenAt, parseHoursString } from "../lib/opening-hours-service";
+import { UserPreferencesStore, DEFAULT_USER_ID, type UserPreferencesDefaults } from "../lib/user-preferences";
+import { promises as afs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 let pass = 0;
@@ -383,6 +387,134 @@ async function main() {
       log(`Tool ${t.name} executes without crash`, false, (e as Error).message);
     }
   }
+
+  // ─── P0-5: User Preferences Store ──────────────────────────────
+  section("🧠 P0-5: User Preferences Store");
+  const smokeUserId = `smoke-prefs-${Date.now()}`;
+  const tmpRoot = await afs.mkdtemp(path.join(os.tmpdir(), "pi-prefs-smoke-"));
+  const tmpPrefsDir = path.join(tmpRoot, "prefs");
+  const tmpPlanStatesDir = path.join(tmpRoot, "plan-states");
+  const store = new UserPreferencesStore(smokeUserId, tmpPrefsDir);
+
+  const empty = await store.load();
+  log("Empty: defaults = {}", Object.keys(empty.defaults).length === 0);
+  log("Empty: totalSessions = 0", empty.stats.totalSessions === 0);
+  log("Empty: recentSessions = []", empty.recentSessions.length === 0);
+  log("Empty: averageBudget = 0", empty.stats.averageBudget === 0);
+
+  const upd1 = await store.updateDefaults({
+    partySize: 2,
+    budgetPerPerson: 300,
+    departurePoint: { name: "三里屯", city: "北京", lng: 116.453, lat: 39.937 },
+    mood: undefined,
+  } satisfies Partial<UserPreferencesDefaults>);
+  log("updateDefaults: partySize=2 set", upd1.defaults.partySize === 2);
+  log("updateDefaults: budget=300 set", upd1.defaults.budgetPerPerson === 300);
+  log("updateDefaults: undefined stripped", upd1.defaults.mood === undefined);
+
+  const af1 = await store.autoFillIntent({ date: "2026-08-01" });
+  log("autoFill: partySize filled", af1.filled.partySize === 2);
+  log("autoFill: budget filled", af1.filled.budgetPerPerson === 300);
+  log("autoFill: departurePoint filled", af1.filled.departurePoint?.name === "三里屯");
+  log("autoFill: date NOT overwritten (user-provided)", af1.filled.date === "2026-08-01");
+  log("autoFill: autoFilledFields lists 3", af1.autoFilledFields.length === 3, af1.autoFilledFields.join(","));
+
+  const af2 = await store.autoFillIntent({
+    date: "2026-08-01", startTime: "10:00", partySize: 4,
+    departurePoint: { name: "国贸", city: "北京", lng: 116.46, lat: 39.91 },
+    budgetPerPerson: 500,
+  });
+  log("autoFill: no-op when all provided", af2.autoFilledFields.length === 0);
+
+  const planStatesA = Array.from({ length: 7 }, (_, i) => ({
+    sessionId: `sess-${i}`,
+    phase: "completed" as const,
+    turnCount: 3,
+    clarificationCount: 0,
+    intent: { date: "2026-07-15", partySize: 2, departurePoint: { name: "三里屯", city: "北京", lng: 116.453, lat: 39.937 } },
+    plan: { summary: `plan ${i}`, timeline: [], totalCost: 0, totalDurationMinutes: 0, weather: { city: "北京", date: "2026-07-15", condition: "sunny" as const, tempMax: 30, tempMin: 20, advice: "" } },
+    lastTransitionAt: Date.now() - i * 1000,
+    history: [],
+  }));
+  for (const ps of planStatesA) await store.recordCompletedSession(ps);
+  const after1 = await store.load();
+  log("recordCompletedSession: capped at 5", after1.recentSessions.length === 5);
+
+  await store.recordCompletedSession(planStatesA[0]!);
+  const after2 = await store.load();
+  log("recordCompletedSession: de-dupes by sessionId", after2.recentSessions.length === 5);
+  log("De-dup: first session still present", after2.recentSessions.some((s) => s.sessionId === "sess-0"));
+
+  await store.reset();
+  const after3 = await store.load();
+  log("reset: recentSessions cleared", after3.recentSessions.length === 0);
+  log("reset: defaults cleared", Object.keys(after3.defaults).length === 0);
+
+  await afs.mkdir(tmpPlanStatesDir, { recursive: true });
+  const refreshEmpty = await store.refreshFromHistory(tmpPlanStatesDir);
+  log("refreshFromHistory: empty dir → empty defaults", Object.keys(refreshEmpty.defaults).length === 0);
+  log("refreshFromHistory: empty dir → totalSessions=0", refreshEmpty.stats.totalSessions === 0);
+
+  for (let i = 0; i < 4; i++) {
+    const ps = {
+      sessionId: `hist-${i}`,
+      phase: i < 3 ? "completed" as const : "executing" as const,
+      turnCount: 3,
+      clarificationCount: 0,
+      intent: {
+        date: "2026-07-15",
+        partySize: 2,
+        departurePoint: { name: "三里屯", city: "北京", lng: 116.453, lat: 39.937 },
+        budgetPerPerson: 300,
+        preferredCategories: ["cultural", "dining"],
+        mood: "romantic",
+      },
+      plan: i < 3 ? {
+        summary: `hist plan ${i}`,
+        timeline: [],
+        totalCost: 0, totalDurationMinutes: 0,
+        weather: { city: "北京", date: "2026-07-15", condition: "sunny" as const, tempMax: 30, tempMin: 20, advice: "" },
+      } : null,
+      lastTransitionAt: Date.now() - (10 - i) * 1000,
+      history: [],
+    };
+    await afs.writeFile(
+      path.join(tmpPlanStatesDir, `hist-${i}.json`),
+      JSON.stringify(ps),
+      "utf-8",
+    );
+  }
+  const outlier = {
+    sessionId: "outlier",
+    phase: "completed" as const,
+    turnCount: 3,
+    clarificationCount: 0,
+    intent: { partySize: 6, budgetPerPerson: 800, mood: "adventurous" },
+    plan: { summary: "outlier", timeline: [], totalCost: 0, totalDurationMinutes: 0, weather: { city: "上海", date: "2026-07-15", condition: "sunny" as const, tempMax: 30, tempMin: 20, advice: "" } },
+    lastTransitionAt: Date.now() - 1000,
+    history: [],
+  };
+  await afs.writeFile(path.join(tmpPlanStatesDir, "outlier.json"), JSON.stringify(outlier), "utf-8");
+
+  const refreshPopulated = await store.refreshFromHistory(tmpPlanStatesDir);
+  log("refresh: partySize=2 (4/5 ≥ 50%)", refreshPopulated.defaults.partySize === 2);
+  log("refresh: budgetPerPerson=300 (4/5)", refreshPopulated.defaults.budgetPerPerson === 300);
+  log("refresh: departurePoint=三里屯 (4/5)", refreshPopulated.defaults.departurePoint?.name === "三里屯");
+  log("refresh: mood=romantic (4/5)", refreshPopulated.defaults.mood === "romantic");
+  log("refresh: preferredCategories=cultural+dining (4/5)", refreshPopulated.defaults.preferredCategories?.length === 2);
+  log("refresh: totalSessions=5", refreshPopulated.stats.totalSessions === 5);
+  log("refresh: totalCompletedPlans=4 (3 from hist + 1 outlier)", refreshPopulated.stats.totalCompletedPlans === 4);
+  log("refresh: averageBudget=(4*300 + 800)/5 = 400", refreshPopulated.stats.averageBudget === 400);
+  log("refresh: favoriteCategories has cultural", refreshPopulated.stats.favoriteCategories.some((c: { category: string }) => c.category === "cultural"));
+
+  const reloaded = new UserPreferencesStore(smokeUserId, tmpPrefsDir);
+  const reloadedPrefs = await reloaded.load();
+  log("Persistence: reloaded defaults match", reloadedPrefs.defaults.partySize === 2);
+  log("Persistence: reloaded stats match", reloadedPrefs.stats.totalSessions === 5);
+
+  log("DEFAULT_USER_ID = 'default'", DEFAULT_USER_ID === "default");
+
+  await afs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
 
   // ─── 综合 ──────────────────────────────────────────────
   console.log("\n=== Summary ===");
