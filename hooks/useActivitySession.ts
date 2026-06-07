@@ -85,6 +85,7 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
   const esRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const planPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const inFlightSendRef = useRef(false);
 
   const stopPlanPoll = useCallback(() => {
     if (planPollRef.current) {
@@ -206,8 +207,10 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
   }, [serverBase, connectEvents, startPlanPoll]);
 
   const sendMessage = useCallback(async (message: string) => {
+    if (inFlightSendRef.current) return;
     const sid = sessionIdRef.current;
     if (!sid) return;
+    inFlightSendRef.current = true;
     try {
       await fetch(`${serverBase}/api/agent/${encodeURIComponent(sid)}`, {
         method: "POST",
@@ -216,6 +219,8 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
       });
     } catch (e) {
       setState((prev) => ({ ...prev, error: (e as Error).message }));
+    } finally {
+      inFlightSendRef.current = false;
     }
   }, [serverBase]);
 
