@@ -1,0 +1,66 @@
+# 待改进观察 (Forward-Looking UX Observations)
+
+> 来源:`docs/UI_DESIGN_ANALYSIS.md` §8(2026-06-07 读源代码时的前瞻性观察)。
+> 抽取时间:2026-06-07 — 3-column 重构(`18df19c`)+ cleanup(`0ca82e1`)完成之后。
+> 目的:这些观察不在重构范围内,但仍然有效 — 落地时可参考,避免再次全量重读代码。
+
+---
+
+## 状态图例
+
+- **[已解决]**:本次 3-column 重构(commit `18df19c` 之后)或更早的 commit 已落地
+- **[部分解决]**:基础设施/方法已就位,UI 接线未做
+- **[未解决]**:观察仍然成立,待后续处理
+
+---
+
+## 1. 信息密度  [未解决]
+
+右栏始终显示全部 4 个子面板。在 `intent_capture` 阶段(还没计划、没工具、没预订),用户会看到 3 个空/占位面板 + 相位条。**可按面板折叠**(或基于相位切换的单面板)能降低噪声。
+
+## 2. 相位进度条  [未解决]
+
+7 个相位:`idle` / `intent_capture` / `clarifying` / `planning` / `plan_confirm` / `executing` / `completed`。**少了 `cancelled`** —— 被取消的会话没有终止指示(进度条只终止于 `completed`)。
+
+## 3. 轮询与 SSE 的重叠  [未解决]
+
+SSE 投递 `message_end` / `tool_execution_start` / `tool_execution_end`,plan-state 1.5s 轮询读到的内容大部分 SSE 事件也覆盖了。**轮询可能冗余**,但目前仍作为 SSE 断开时的兜底保留(有用但可能过度)。
+
+## 4. UI 中看不到用户身份  [未解决]
+
+`lib/user-context.ts: getCurrentUserIdFromRequest()` 解析 userId,`UserPreferencesPanel` 隐式显示,但 UI **从不**显式展示「你是 alice」之类。Header 加个身份小标签更清楚。`/api/dev-login` 是 dev-only — UI 上加个「dev 模式」提示能避免误用。
+
+## 5. 错误暴露  [未解决]
+
+错误现在以 banner 形式渲染在消息列表上方(早期修复)。但 **plan-state 轮询** 或 **preferences 轮询**(若端点 500)的错误**没有暴露** —— 只在 console。SSE 重连是静默的。加个「正在重连…」指示器能帮用户理解停顿。
+
+## 6. 相位 ↔ 面板的映射  [未解决]
+
+右栏的 4 个区段并不总与当前相位对齐:
+- `PlanTimeline` 只在 `plan_confirm`+ 有用,但始终显示
+- `ToolTimeline` 只在 `executing` 有用,但始终显示
+- `BookingCard` 只在 `reservation_exec` 之后有用,但始终显示
+
+基于相位的布局(显示/隐藏 或 展开/折叠)能让当前状态更易读。
+
+## 7. 硬编码 SAMPLE_PROMPTS  [已解决]
+
+原 6 个 prompt 硬编码在 `app/activity/page.tsx`,用户不可配置。**3-column 重构落地时删除**(commit `18df19c`,与 `ActivityPanelWrapper.tsx` 一起),统一视觉一致性优先于新用户引导。`grep -r SAMPLE_PROMPTS` 现在为空。
+
+## 8. ToolTimeline 的空/尚无工具状态  [未解决]
+
+原始观察:未确认空列表分支 — 工具时间线是显示「暂无工具调用」占位还是直接空渲染?**需要在 `executing` 阶段早期(还没有 tool calls)实际查看一次**。
+
+## 9. 取消 UX  [部分解决]
+
+原始观察:`reset()` 在 hook 里存在,但按钮是否接通不清楚。
+当前状态:`useActivitySession.abort()` 方法已加(commit `18df19c`,`hooks/useActivitySession.ts:253`),通过 `POST /api/agent/[id]` body `{type:"abort"}` 终止 session。**`components/ActivityPanelWrapper.tsx` 未引用 `abort`** — UI 接线待做,用户当前无法取消正在运行的 LLM 任务。
+
+---
+
+## 备注
+
+- 原 `docs/UI_DESIGN_ANALYSIS.md` 在抽取本文件后被删除(文件从未 commit 过,无 git history)。
+- 原文件 §2.1 / §6.1 含有错误信息(声称 AppShell 33K+ 行、Tailwind utility 风格 — 实际 614 行,inline styles + CSS variables),故原文件不可原样保留。
+- §7「值得保留的模式」没有提取 —— 那些都是「好的实践,保持原样」,不需要 follow-up 文档。
+- 落地任一观察时,先在本文件里把状态改成 `[已解决]` 并加 commit ref,避免下次全量重读。
