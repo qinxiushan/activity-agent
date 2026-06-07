@@ -47,9 +47,10 @@ SSE 投递 `message_end` / `tool_execution_start` / `tool_execution_end`,plan-st
 
 原 6 个 prompt 硬编码在 `app/activity/page.tsx`,用户不可配置。**3-column 重构落地时删除**(commit `18df19c`,与 `ActivityPanelWrapper.tsx` 一起),统一视觉一致性优先于新用户引导。`grep -r SAMPLE_PROMPTS` 现在为空。
 
-## 8. ToolTimeline 的空/尚无工具状态  [未解决]
+## 8. ToolTimeline 的空/尚无工具状态  [已解决]
 
-原始观察:未确认空列表分支 — 工具时间线是显示「暂无工具调用」占位还是直接空渲染?**需要在 `executing` 阶段早期(还没有 tool calls)实际查看一次**。
+原始观察:未确认空列表分支 — 工具时间线是显示「暂无工具调用」占位还是直接空渲染?
+确认:`components/activity/ToolTimeline.tsx:36-53` 有空数组分支 — 渲染 panel 容器 + 标题"工具调用时间线" + 占位文字 "等待 LLM 开始…"(dim 色,居中)。模式与 `PlanTimeline` 的 "LLM 正在自动规划…" 占位一致(同样是「还在等数据」语义,不是「完成了」语义)。无需改动。
 
 ## 9. 取消 UX  [已解决]
 
