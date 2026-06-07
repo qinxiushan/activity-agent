@@ -658,7 +658,7 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
 
       {/* Right panel: ActivityPanelWrapper (or placeholder) — always mounted, width animated via CSS */}
       {rightPanel && (
-        <>
+        <div style={{ display: rightPanelOpen ? "flex" : "none" }}>
           <div
             onMouseDown={handleResizeStart}
             onMouseEnter={(e) => { e.currentTarget.style.background = "var(--accent)"; }}
@@ -685,7 +685,7 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
               {rightPanel}
             </div>
           </div>
-        </>
+        </div>
       )}
     </div>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
