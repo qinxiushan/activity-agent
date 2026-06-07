@@ -41,9 +41,15 @@
 - `app/api/whoami/route.ts` — 解析 userId(header > cookie > os),cookie 源标记 `isDev: true`(cookie 只能由 `/api/dev-login` 设,等同 dev 模式)
 - `components/AppShell.tsx` — 顶栏加 useState/useEffect 拉取,渲染 identity badge(绝对定位 `right: 12/48`,无论 session stats 是否显示都贴在最右)。正常态:彩点 + userId;dev 模式:红点 + userId + 红色 "DEV" 标签
 
-## 5. 错误暴露  [未解决]
+## 5. 错误暴露  [已解决]
 
-错误现在以 banner 形式渲染在消息列表上方(早期修复)。但 **plan-state 轮询** 或 **preferences 轮询**(若端点 500)的错误**没有暴露** —— 只在 console。SSE 重连是静默的。加个「正在重连…」指示器能帮用户理解停顿。
+解决:2 个 commit 落地 — `d8c5cda` (plan-state 轮询) 和 `a89f379` (SSE 重连)。
+
+**plan-state 轮询**:`useActivitySession.ts` 加 `planStateError` 状态,`planPollErrorCountRef` 追踪连续失败次数,在第 3 次 (~4.5s) 暴露 `phase 数据可能过期 (HTTP XXX)`。banner 配「重试」按钮,自动调 `retryPlanPoll`,成功即清。`reset` 时清 ref。
+
+**SSE 重连**:加 `sseReconnecting` 布尔状态 — `es.onopen` 置 false(连上),`es.onerror` 置 true(掉线后开始 backoff)。`ActivityPanelWrapper` 头部加琥珀色「正在重连…」badge,与「LLM 工作中」并列显示,带 pulse 动画(复用现有 `pulse` CSS)。
+
+**preferences 轮询** — 观察已 stale:`UserPreferencesPanel.tsx` 第 47/49-58 行 `setError` + 第 109-118/244-246 行已经在 UI 暴露。无需改。
 
 ## 6. 相位 ↔ 面板的映射  [已解决]
 
