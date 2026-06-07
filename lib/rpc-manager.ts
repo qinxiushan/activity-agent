@@ -336,13 +336,12 @@ export function getRpcSession(sessionId: string): AgentSessionWrapper | undefine
 /**
  * Get or create an AgentSession for the given session.
  * For new sessions (sessionFile === ""), pi generates its own id.
- * Pass toolNames to pre-configure active tools (empty array = all tools disabled).
+ * Always activates the full set of activity planner tools.
  */
 export async function startRpcSession(
   sessionId: string,
   sessionFile: string,
-  cwd: string,
-  toolNames?: string[]
+  cwd: string
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
   const registry = getRegistry();
   const locks = getLocks();
@@ -371,11 +370,7 @@ export async function startRpcSession(
       customTools: activityToolsList,
     });
 
-    if (toolNames !== undefined) {
-      inner.setActiveToolsByName(toolNames);
-    } else {
-      inner.setActiveToolsByName(ACTIVITY_TOOL_NAMES);
-    }
+    inner.setActiveToolsByName(ACTIVITY_TOOL_NAMES);
 
     const realSessionId = inner.sessionId as string;
     const realSessionFile = inner.sessionFile as string | undefined;
