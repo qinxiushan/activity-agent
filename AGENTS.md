@@ -9,8 +9,10 @@ npm run dev                  # port 30142
 | Check | Command |
 |-------|---------|
 | Typecheck | `node_modules/.bin/tsc --noEmit` |
-| Unit + integration smoke (no API key) | `npx tsx scripts/p0-smoke-test.ts` |
-| Real LLM e2e (HTTP, requires dev server + API key) | `npm run e2e:real` |
+| Unit + integration smoke (no API key) | `npm run test:smoke` |
+| Real LLM e2e — one-shot (auto-starts dev server) | `npm run e2e` |
+| Real LLM e2e — manual (server must be running) | `npm run e2e:real` |
+| Playwright visual | `npm run test:visual` |
 
 ## Model Configuration — 3 Files, Not 1
 

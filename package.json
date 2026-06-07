@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "test:smoke": "tsx scripts/p0-smoke-test.ts",
     "e2e:real": "tsx scripts/e2e-real-llm-test.ts",
+    "e2e": "tsx scripts/e2e-with-server.ts",
     "test:visual": "playwright test"
   },
   "dependencies": {
