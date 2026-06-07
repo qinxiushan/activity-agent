@@ -31,6 +31,43 @@ function formatTime(ts?: number): string | null {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+const TOOL_CALL_SIGNATURE = /"(saved|intent|clarificationAsked|missingFields|question|fallbackDefaults|hardLimit|planSubmitted|plan|currentPhase|autoFilledFields|supportedCities|instructionToUser|clarificationsUsed)"/;
+
+function stripToolCallJSON(content: string): string {
+  const parts: string[] = [];
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === "{") {
+      let depth = 1;
+      let j = i + 1;
+      let inString = false;
+      let escaped = false;
+      while (j < content.length && depth > 0) {
+        const ch = content[j];
+        if (escaped) { escaped = false; j++; continue; }
+        if (ch === "\\") { escaped = true; j++; continue; }
+        if (ch === "\"") { inString = !inString; j++; continue; }
+        if (!inString) {
+          if (ch === "{") depth++;
+          else if (ch === "}") depth--;
+        }
+        j++;
+      }
+      const block = content.slice(i, j);
+      if (TOOL_CALL_SIGNATURE.test(block)) {
+        i = j;
+        continue;
+      }
+      parts.push(block);
+      i = j;
+    } else {
+      parts.push(content[i]);
+      i++;
+    }
+  }
+  return parts.join("").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 export function ActivityInput({
   sessionId,
   messages,
@@ -149,7 +186,7 @@ export function ActivityInput({
               </div>
               <div className="markdown-body" style={{ fontSize: 14, lineHeight: 1.6, color: "var(--text)" }}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {msg.content || "..."}
+                  {stripToolCallJSON(msg.content || "...")}
                 </ReactMarkdown>
               </div>
             </div>
