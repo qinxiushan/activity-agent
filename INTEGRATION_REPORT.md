@@ -4,7 +4,7 @@
 >
 > **报告时间**：2026-06-06
 >
-> **最后更新**：2026-06-06（SOP-v2 同步，见附录 C "状态同步日志"）
+> **最后更新**：2026-06-07（删除 11 个 pi-web stub routes：auth/*、skills/*、models-config/test、sessions/new；见 commit b493687）
 >
 > **基线版本**：
 > - `activity-agent`：本地 `package.json`（commit HEAD）
