@@ -12,6 +12,25 @@ npm run dev                  # port 30142
 | Unit + integration smoke (no API key) | `npx tsx scripts/p0-smoke-test.ts` |
 | Real LLM e2e (HTTP, requires dev server + API key) | `npm run e2e:real` |
 
+## Model Configuration — 3 Files, Not 1
+
+**改错了文件 = 改半天 LLM 没反应。** LLM 模型配置分布在 3 个文件里（不是 1 个）：
+
+| 文件 | 管什么 | 什么时候改 |
+|---|---|---|
+| `~/.pi/agent/settings.json` | 默认 provider + modelId | 想换默认模型时 |
+| `~/.pi/agent/auth.json` (0600) | **内置** provider 的 API key | 想用 deepseek/openai/anthropic 等官方 provider 时 |
+| `~/.pi/agent/models.json` (可选) | **自定义** provider/model + 备用 key | 想接自建 / 第三方 / 微调模型时 |
+
+**经验法则**：
+1. 改默认模型 = `settings.json`
+2. 改 API key = `auth.json`（**不是** `models.json`）
+3. 改模型行为 / 加自定义 provider = `models.json`
+
+**完整指南**（含 5 大坑的排查步骤、22+ provider 速查表、OAuth 流程、models.json schema）：看 [`docs/MODEL_CONFIG.md`](docs/MODEL_CONFIG.md)。
+
+**为什么是 3 个文件？** pi-coding-agent 把 "**默认配置**" 和 "**凭证**" 拆开（`settings.json` + `auth.json`），又为高级用户留了 "**自定义 provider**" 扩展点（`models.json`）。`AuthStorage.getApiKey()` 有 5 级 fallback 链，**`auth.json` 永远赢** `models.json`。
+
 ## Workflow: SOP-v2 (8 phases, single-confirm, 1-clarify)
 
 ```
