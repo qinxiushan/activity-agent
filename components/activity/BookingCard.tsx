@@ -17,20 +17,27 @@ function extractBooking(toolCalls: ActivityToolCall[]): BookingDetails | null {
     const tc = toolCalls[i]!;
     if (tc.name !== "reservation_exec" && tc.name !== "query_booking") continue;
     if (!tc.ok) continue;
-    try {
-      const parsed = JSON.parse(tc.resultSummary) as Record<string, unknown>;
-      const orderId = (parsed.orderId as string) ?? "";
-      const restaurantName = (parsed.restaurantName as string) ?? "";
-      const date = (parsed.date as string) ?? "";
-      const time = (parsed.time as string) ?? "";
-      const partySize = typeof parsed.partySize === "number" ? parsed.partySize : 2;
-      const confirmationCode = (parsed.confirmationCode as string | undefined) ?? (parsed.code as string | undefined);
-      const status = (parsed.status as string) ?? "unknown";
-      if (orderId) {
-        return { orderId, restaurantName, date, time, partySize, confirmationCode, status };
-      }
-    } catch { /* skip */ }
+    const parsed = parseBookingResult(tc.result);
+    if (!parsed) continue;
+    const orderId = (parsed.orderId as string) ?? "";
+    if (!orderId) continue;
+    const restaurantName = (parsed.restaurantName as string) ?? "";
+    const date = (parsed.date as string) ?? "";
+    const time = (parsed.time as string) ?? "";
+    const partySize = typeof parsed.partySize === "number" ? parsed.partySize : 2;
+    const confirmationCode = (parsed.confirmationCode as string | undefined) ?? (parsed.code as string | undefined);
+    const status = (parsed.status as string) ?? "unknown";
+    return { orderId, restaurantName, date, time, partySize, confirmationCode, status };
   }
+  return null;
+}
+
+function parseBookingResult(result: unknown): Record<string, unknown> | null {
+  if (result === undefined || result === null) return null;
+  if (typeof result === "string") {
+    try { return JSON.parse(result) as Record<string, unknown>; } catch { return null; }
+  }
+  if (typeof result === "object") return result as Record<string, unknown>;
   return null;
 }
 

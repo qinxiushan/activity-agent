@@ -7,6 +7,7 @@ export interface ActivityToolCall {
   name: string;
   argsSummary: string;
   resultSummary: string;
+  result: unknown;
   ok: boolean;
   startedAt: number;
   endedAt: number | null;
@@ -167,6 +168,7 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
               id, name,
               argsSummary: summarizeArgs(args),
               resultSummary: "",
+              result: undefined,
               ok: true,
               startedAt: Date.now(),
               endedAt: null,
@@ -181,7 +183,7 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
             setState((prev) => ({
               ...prev,
               toolCalls: prev.toolCalls.map((t) => t.id === id
-                ? { ...t, ok: !isError, resultSummary: summarizeResult(result), endedAt: Date.now() }
+                ? { ...t, ok: !isError, result, resultSummary: summarizeResult(result), endedAt: Date.now() }
                 : t),
             }));
             break;
