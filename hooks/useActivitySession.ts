@@ -86,11 +86,20 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
   const sessionIdRef = useRef<string | null>(null);
   const planPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inFlightSendRef = useRef(false);
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stopPlanPoll = useCallback(() => {
     if (planPollRef.current) {
       clearInterval(planPollRef.current);
       planPollRef.current = null;
+    }
+  }, []);
+
+  const cancelReconnect = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
     }
   }, []);
 
@@ -112,80 +121,94 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
   }, [serverBase, stopPlanPoll]);
 
   const connectEvents = useCallback((sid: string) => {
+    cancelReconnect();
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
-    const es = new EventSource(`${serverBase}/api/agent/${encodeURIComponent(sid)}/events`);
-    esRef.current = es;
-    es.onmessage = (e) => {
-      let ev: RawEvent;
-      try { ev = JSON.parse(e.data) as RawEvent; } catch { return; }
-      switch (ev.type) {
-        case "agent_start":
-          setState((prev) => ({ ...prev, agentRunning: true }));
-          break;
-        case "agent_end":
-          setState((prev) => ({ ...prev, agentRunning: false }));
-          break;
-        case "message_end": {
-          const m = ev.message as { role?: string; content?: Array<{ type: string; text?: string }> } | undefined;
-          if (!m) return;
-          let text = "";
-          if (typeof m.content === "string") text = m.content;
-          else if (Array.isArray(m.content)) {
-            text = m.content.filter((b) => b.type === "text" && typeof b.text === "string").map((b) => b.text ?? "").join("");
-          }
-          if (!text && m.role !== "user") return;
-          setState((prev) => {
-            const last = prev.messages[prev.messages.length - 1];
-            if (last && last.role === m.role && Math.abs(last.timestamp - (ev.timestamp as number ?? Date.now())) < 200) {
-              return { ...prev, messages: [...prev.messages.slice(0, -1), { ...last, content: last.content + text }] };
+    reconnectAttemptsRef.current = 0;
+
+    const connect = (): void => {
+      if (sessionIdRef.current !== sid) return;
+      const es = new EventSource(`${serverBase}/api/agent/${encodeURIComponent(sid)}/events`);
+      esRef.current = es;
+      es.onopen = () => { reconnectAttemptsRef.current = 0; };
+      es.onmessage = (e) => {
+        reconnectAttemptsRef.current = 0;
+        let ev: RawEvent;
+        try { ev = JSON.parse(e.data) as RawEvent; } catch { return; }
+        switch (ev.type) {
+          case "agent_start":
+            setState((prev) => ({ ...prev, agentRunning: true }));
+            break;
+          case "agent_end":
+            setState((prev) => ({ ...prev, agentRunning: false }));
+            break;
+          case "message_end": {
+            const m = ev.message as { role?: string; content?: Array<{ type: string; text?: string }> } | undefined;
+            if (!m) return;
+            let text = "";
+            if (typeof m.content === "string") text = m.content;
+            else if (Array.isArray(m.content)) {
+              text = m.content.filter((b) => b.type === "text" && typeof b.text === "string").map((b) => b.text ?? "").join("");
             }
-            return { ...prev, messages: [...prev.messages, { role: (m.role as "user" | "assistant") ?? "assistant", content: text, timestamp: Date.now() }] };
-          });
-          break;
+            if (!text && m.role !== "user") return;
+            setState((prev) => {
+              const last = prev.messages[prev.messages.length - 1];
+              if (last && last.role === m.role && Math.abs(last.timestamp - (ev.timestamp as number ?? Date.now())) < 200) {
+                return { ...prev, messages: [...prev.messages.slice(0, -1), { ...last, content: last.content + text }] };
+              }
+              return { ...prev, messages: [...prev.messages, { role: (m.role as "user" | "assistant") ?? "assistant", content: text, timestamp: Date.now() }] };
+            });
+            break;
+          }
+          case "tool_execution_start": {
+            const id = (ev.toolCallId as string) ?? Math.random().toString(36).slice(2);
+            const name = (ev.toolName as string) ?? "?";
+            const args = ev.args;
+            const tc: ActivityToolCall = {
+              id, name,
+              argsSummary: summarizeArgs(args),
+              resultSummary: "",
+              ok: true,
+              startedAt: Date.now(),
+              endedAt: null,
+            };
+            setState((prev) => ({ ...prev, toolCalls: [...prev.toolCalls, tc] }));
+            break;
+          }
+          case "tool_execution_end": {
+            const id = (ev.toolCallId as string) ?? "";
+            const result = ev.result;
+            const isError = ev.isError === true;
+            setState((prev) => ({
+              ...prev,
+              toolCalls: prev.toolCalls.map((t) => t.id === id
+                ? { ...t, ok: !isError, resultSummary: summarizeResult(result), endedAt: Date.now() }
+                : t),
+            }));
+            break;
+          }
         }
-        case "tool_execution_start": {
-          const id = (ev.toolCallId as string) ?? Math.random().toString(36).slice(2);
-          const name = (ev.toolName as string) ?? "?";
-          const args = ev.args;
-          const tc: ActivityToolCall = {
-            id, name,
-            argsSummary: summarizeArgs(args),
-            resultSummary: "",
-            ok: true,
-            startedAt: Date.now(),
-            endedAt: null,
-          };
-          setState((prev) => ({ ...prev, toolCalls: [...prev.toolCalls, tc] }));
-          break;
-        }
-        case "tool_execution_end": {
-          const id = (ev.toolCallId as string) ?? "";
-          const result = ev.result;
-          const isError = ev.isError === true;
-          setState((prev) => ({
-            ...prev,
-            toolCalls: prev.toolCalls.map((t) => t.id === id
-              ? { ...t, ok: !isError, resultSummary: summarizeResult(result), endedAt: Date.now() }
-              : t),
-          }));
-          break;
-        }
-      }
-    };
-    es.onerror = () => {
-      if (esRef.current === es) {
+      };
+      es.onerror = () => {
+        if (esRef.current !== es) return;
+        if (sessionIdRef.current !== sid) return;
         es.close();
         esRef.current = null;
-      }
+        const attempt = reconnectAttemptsRef.current++;
+        const delayMs = Math.min(1000 * 2 ** attempt, 30_000);
+        reconnectTimerRef.current = setTimeout(connect, delayMs);
+      };
     };
-  }, [serverBase]);
+
+    connect();
+  }, [serverBase, cancelReconnect]);
 
   useEffect(() => {
     return () => {
+      cancelReconnect();
       esRef.current?.close();
       stopPlanPoll();
     };
-  }, [stopPlanPoll]);
+  }, [stopPlanPoll, cancelReconnect]);
 
   const startSession = useCallback(async (cwd: string, message: string, model: { provider: string; modelId: string }) => {
     setState({ ...INITIAL, error: null });
@@ -225,12 +248,13 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
   }, [serverBase]);
 
   const reset = useCallback(() => {
+    cancelReconnect();
     esRef.current?.close();
     esRef.current = null;
     stopPlanPoll();
     sessionIdRef.current = null;
     setState(INITIAL);
-  }, [stopPlanPoll]);
+  }, [stopPlanPoll, cancelReconnect]);
 
   return { ...state, startSession, sendMessage, reset };
 }
