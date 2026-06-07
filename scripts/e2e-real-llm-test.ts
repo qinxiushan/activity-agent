@@ -306,6 +306,40 @@ async function main(): Promise<void> {
   const tempCwd = await makeTempCwd();
   ok("temp cwd created", existsSync(tempCwd), tempCwd);
 
+  section("👥 userId 隔离 (v2)");
+  const aliceId = `e2e-alice-${Date.now()}`;
+  const bobId = `e2e-bob-${Date.now()}`;
+
+  const aliceInit = await fetch(`${SERVER_BASE}/api/user-preferences?userId=${aliceId}`).then((r) => r.json()) as { preferences: { defaults: Record<string, unknown> } };
+  ok("alice initial: empty defaults", Object.keys(aliceInit.preferences.defaults).length === 0, aliceId);
+
+  const alicePutRes = await fetch(`${SERVER_BASE}/api/user-preferences`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId: aliceId, defaults: { partySize: 4, budgetPerPerson: 1000 } }),
+  });
+  ok("alice PUT defaults", alicePutRes.ok);
+
+  const aliceRead = await fetch(`${SERVER_BASE}/api/user-preferences?userId=${aliceId}`).then((r) => r.json()) as { preferences: { defaults: { partySize?: number; budgetPerPerson?: number } } };
+  ok("alice reads back partySize=4", aliceRead.preferences.defaults.partySize === 4);
+  ok("alice reads back budget=1000", aliceRead.preferences.defaults.budgetPerPerson === 1000);
+
+  const bobRead = await fetch(`${SERVER_BASE}/api/user-preferences?userId=${bobId}`).then((r) => r.json()) as { preferences: { defaults: Record<string, unknown> } };
+  ok("bob isolated: empty defaults (didn't see alice's data)", Object.keys(bobRead.preferences.defaults).length === 0);
+
+  const aliceResetRes = await fetch(`${SERVER_BASE}/api/user-preferences`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId: aliceId, action: "reset" }),
+  });
+  ok("alice reset ok", aliceResetRes.ok);
+
+  const aliceAfterReset = await fetch(`${SERVER_BASE}/api/user-preferences?userId=${aliceId}`).then((r) => r.json()) as { preferences: { defaults: Record<string, unknown> } };
+  ok("alice after reset: empty", Object.keys(aliceAfterReset.preferences.defaults).length === 0);
+
+  const bobFinal = await fetch(`${SERVER_BASE}/api/user-preferences?userId=${bobId}`).then((r) => r.json()) as { preferences: { defaults: Record<string, unknown> } };
+  ok("bob still isolated after alice reset", Object.keys(bobFinal.preferences.defaults).length === 0);
+
   let currentTurn = 1;
 
   const turns: ToolCallRecord[][] = [[]];
