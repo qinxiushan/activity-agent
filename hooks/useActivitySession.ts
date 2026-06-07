@@ -177,7 +177,7 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
         esRef.current = null;
       }
     };
-  }, [serverBase, state.toolCalls.length]);
+  }, [serverBase]);
 
   useEffect(() => {
     return () => {
