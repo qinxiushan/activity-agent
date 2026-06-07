@@ -50,6 +50,7 @@ import { getWeather } from "../../lib/weather-service";
 import { computeRoute, buildRouteChain } from "../../lib/route-service";
 import { isOpenAt, parseHoursString } from "../../lib/opening-hours-service";
 import { getUserPreferencesStore } from "../../lib/user-preferences";
+import { getCurrentUserId } from "../../lib/user-context";
 
 // ─── Schema 定义 ──────────────────────────────────────────────────
 
@@ -543,7 +544,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           time: params.time,
           partySize: params.partySize,
           specialRequests: params.specialRequests,
-          userId: params.userId ?? "default",
+          userId: params.userId ?? getCurrentUserId(),
         };
         try {
           const order = await getBookingService().createBooking(input);
@@ -632,7 +633,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           const trans = await mgr.transition("completed", "plan saved");
           if (trans.ok) {
             try {
-              await getUserPreferencesStore().recordCompletedSession(mgr.current);
+              await getUserPreferencesStore(getCurrentUserId()).recordCompletedSession(mgr.current);
             } catch (e) {
               console.error("[plan_save] recordCompletedSession failed:", e);
             }
