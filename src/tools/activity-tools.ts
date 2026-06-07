@@ -49,6 +49,7 @@ import { guardToolCallWithActive, MAX_CLARIFICATIONS, getActivePlanState, getMis
 import { getWeather } from "../../lib/weather-service";
 import { computeRoute, buildRouteChain } from "../../lib/route-service";
 import { isOpenAt, parseHoursString } from "../../lib/opening-hours-service";
+import { getUserPreferencesStore } from "../../lib/user-preferences";
 
 // ─── Schema 定义 ──────────────────────────────────────────────────
 
@@ -245,12 +246,34 @@ export function getActivityPlannerTools(): ToolDefinition[] {
             specialRequests: params.specialRequests,
           });
 
+          let autoFilledFields: string[] = [];
           if (mgr.currentPhase === "intent_capture") {
+            const { filled, autoFilledFields: af } = await getUserPreferencesStore().autoFillIntent(mgr.intent);
+            if (af.length > 0) {
+              mgr.recordIntent(filled);
+              autoFilledFields = af;
+            }
             const missing = getMissingCriticalFields(mgr.intent);
             if (missing.length === 0) {
-              await mgr.transition("planning", "all critical fields captured");
+              await mgr.transition("planning", autoFilledFields.length > 0
+                ? `all critical fields captured (${autoFilledFields.length} from user prefs: ${autoFilledFields.join(", ")})`
+                : "all critical fields captured");
             }
           }
+
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({
+              saved: true,
+              intent: mgr.intent,
+              autoFilledFields,
+              supportedCities: ["北京", "上海", "深圳"],
+              currentPhase: mgr.currentPhase,
+              note: autoFilledFields.length > 0
+                ? `已用用户偏好自动填充 ${autoFilledFields.length} 个字段：${autoFilledFields.join("、")}。请在回复中告知用户，并允许覆盖。`
+                : "若关键字段缺失，调用 ask_clarification 一次性追问（最多 1 次）",
+            }, null, 2) }],
+            details: { ...params, _autoFilled: autoFilledFields },
+          };
         }
 
         return {
@@ -258,7 +281,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
             saved: true,
             intent: params,
             supportedCities: ["北京", "上海", "深圳"],
-            currentPhase: mgr?.currentPhase ?? "unknown",
+            currentPhase: "unknown",
             note: "若关键字段缺失，调用 ask_clarification 一次性追问（最多 1 次）",
           }, null, 2) }],
           details: params,
@@ -604,6 +627,17 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       parameters: planSaveSchema,
       execute: async (_id, params: Static<typeof planSaveSchema>) => {
         const result = { planId: params.planId ?? `plan-${Date.now().toString(36)}`, saved: true };
+        const mgr = getActivePlanState();
+        if (mgr && mgr.currentPhase === "executing") {
+          const trans = await mgr.transition("completed", "plan saved");
+          if (trans.ok) {
+            try {
+              await getUserPreferencesStore().recordCompletedSession(mgr.current);
+            } catch (e) {
+              console.error("[plan_save] recordCompletedSession failed:", e);
+            }
+          }
+        }
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
           details: result,
