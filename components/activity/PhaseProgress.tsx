@@ -10,6 +10,7 @@ const PHASES = [
   { key: "plan_confirm", label: "等待确认", icon: "" },
   { key: "executing", label: "执行预订", icon: "→" },
   { key: "completed", label: "完成", icon: "✓" },
+  { key: "cancelled", label: "已取消", icon: "✕" },
 ] as const;
 
 const PHASE_DESCRIPTIONS: Record<string, string> = {
@@ -25,8 +26,11 @@ const PHASE_DESCRIPTIONS: Record<string, string> = {
 
 export function PhaseProgress({ planState }: { planState: ActivityPlanState | null }) {
   const currentKey = planState?.phase ?? "idle";
-  const currentIdx = PHASES.findIndex((p) => p.key === currentKey);
   const isCancelled = currentKey === "cancelled";
+  const effectiveKey = isCancelled
+    ? planState?.history?.filter((h) => h.phase !== "cancelled").at(-1)?.phase ?? "idle"
+    : currentKey;
+  const currentIdx = PHASES.findIndex((p) => p.key === effectiveKey);
 
   return (
     <div style={{
@@ -45,8 +49,8 @@ export function PhaseProgress({ planState }: { planState: ActivityPlanState | nu
 
       <div style={{ marginBottom: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          {PHASES.map((p, i) => {
-            const isCurrent = p.key === currentKey;
+          {PHASES.slice(0, 7).map((p, i) => {
+            const isCurrent = p.key === effectiveKey;
             const isPast = i < currentIdx;
             const dotBg = isCurrent
               ? "var(--accent)"
@@ -54,7 +58,7 @@ export function PhaseProgress({ planState }: { planState: ActivityPlanState | nu
                 ? "color-mix(in srgb, var(--accent) 50%, transparent)"
                 : "var(--bg-hover)";
             const dotColor = isCurrent || isPast ? "white" : "var(--text-dim)";
-            const isLast = i === PHASES.length - 1;
+            const isLast = i === 6;
             const connectorBg = isPast
               ? "color-mix(in srgb, var(--accent) 50%, transparent)"
               : "var(--border)";
@@ -80,11 +84,26 @@ export function PhaseProgress({ planState }: { planState: ActivityPlanState | nu
               </div>
             );
           })}
+          {isCancelled && (
+            <>
+              <div style={{
+                flex: 1, height: 2, background: "rgba(239,68,68,0.3)",
+                marginLeft: 4, marginRight: 4, minWidth: 4,
+              }} />
+              <div style={{
+                width: 26, height: 26, borderRadius: "50%",
+                background: "rgba(239,68,68,0.15)", color: "#ef4444",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 12, fontWeight: 600, flexShrink: 0,
+                boxShadow: "0 0 0 4px rgba(239,68,68,0.15)",
+              }}>✕</div>
+            </>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 4, marginTop: 6 }}>
-          {PHASES.map((p, i) => {
-            const isCurrent = p.key === currentKey;
-            const isLast = i === PHASES.length - 1;
+          {PHASES.slice(0, 7).map((p, i) => {
+            const isCurrent = p.key === effectiveKey;
+            const isLast = i === 6;
             return (
               <div key={p.key} style={{
                 flex: isLast ? "0 0 auto" : 1, minWidth: 0,
@@ -102,6 +121,20 @@ export function PhaseProgress({ planState }: { planState: ActivityPlanState | nu
               </div>
             );
           })}
+          {isCancelled && (
+            <div style={{
+              flex: "0 0 auto", minWidth: 0,
+              display: "flex", flexDirection: "column", alignItems: "center",
+            }}>
+              <div style={{
+                fontSize: 9, color: "#ef4444", fontWeight: 600,
+                textAlign: "center", whiteSpace: "nowrap",
+                paddingLeft: 4, paddingRight: 4,
+              }}>
+                已取消
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
