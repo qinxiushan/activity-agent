@@ -78,6 +78,7 @@ function summarizeResult(result: unknown, max = 80): string {
 export interface UseActivitySessionResult extends ActivityState {
   startSession: (cwd: string, message: string, model: { provider: string; modelId: string }) => Promise<void>;
   sendMessage: (message: string) => Promise<void>;
+  abort: () => Promise<void>;
   reset: () => void;
 }
 
@@ -249,6 +250,20 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
     }
   }, [serverBase]);
 
+  const abort = useCallback(async () => {
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    try {
+      await fetch(`${serverBase}/api/agent/${encodeURIComponent(sid)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "abort" }),
+      });
+    } catch (e) {
+      setState((prev) => ({ ...prev, error: (e as Error).message }));
+    }
+  }, [serverBase]);
+
   const reset = useCallback(() => {
     cancelReconnect();
     esRef.current?.close();
@@ -258,5 +273,5 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
     setState(INITIAL);
   }, [stopPlanPoll, cancelReconnect]);
 
-  return { ...state, startSession, sendMessage, reset };
+  return { ...state, startSession, sendMessage, abort, reset };
 }

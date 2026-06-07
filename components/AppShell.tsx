@@ -1,11 +1,9 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useState, useCallback, useRef, useEffect, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
-import { FileViewer } from "./FileViewer";
-import { TabBar, type Tab } from "./TabBar";
 import { ModelsConfig } from "./ModelsConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { BranchNavigator } from "./BranchNavigator";
@@ -13,10 +11,9 @@ import { useTheme } from "@/hooks/useTheme";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 
-export function AppShell() {
+export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const pathname = usePathname();
   const { isDark, toggleTheme } = useTheme();
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
@@ -85,10 +82,7 @@ export function AppShell() {
     return () => ro.disconnect();
   }, [activeTopPanel]);
 
-  // Right panel — file tabs only
-  const [fileTabs, setFileTabs] = useState<Tab[]>([]);
-  const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
-  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
 
   const handleAtMention = useCallback((relativePath: string) => {
     chatInputRef.current?.insertText("`" + relativePath + "`");
@@ -196,36 +190,16 @@ export function AppShell() {
     }
   }, [selectedSession, router]);
 
-  const handleOpenFile = useCallback((filePath: string, fileName: string) => {
-    const tabId = `file:${filePath}`;
-    setFileTabs((prev) => {
-      if (prev.find((t) => t.id === tabId)) return prev;
-      return [...prev, { id: tabId, label: fileName, filePath }];
-    });
-    setActiveFileTabId(tabId);
-    setRightPanelOpen(true);
-  }, []);
-
-  const handleCloseFileTab = useCallback((tabId: string) => {
-    setFileTabs((prev) => {
-      const next = prev.filter((t) => t.id !== tabId);
-      if (next.length === 0) setRightPanelOpen(false);
-      return next;
-    });
-    setActiveFileTabId((cur) => {
-      if (cur !== tabId) return cur;
-      const remaining = fileTabs.filter((t) => t.id !== tabId);
-      return remaining.length > 0 ? remaining[remaining.length - 1].id : null;
-    });
-  }, [fileTabs]);
+  // TODO: file viewer dropped in 3-column merge — SessionSidebar still calls onOpenFile,
+  // but the right panel now hosts ActivityPanelWrapper. To restore: re-add FileViewer +
+  // TabBar imports, fileTabs/activeFileTabId state, and a right-panel header with TabBar.
+  const handleOpenFile = useCallback((_filePath: string, _fileName: string) => {}, []);
 
   // Show chat area if a session is selected, or if we have a cwd to start a new session in
   const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
   const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
   // While restoring initial session from URL, don't show the placeholder
   const showPlaceholder = initialSessionRestored && !showChat;
-
-  const activeFileTab = fileTabs.find((t) => t.id === activeFileTabId) ?? null;
 
   const sidebarContent = (
     <>
@@ -385,28 +359,28 @@ export function AppShell() {
               </svg>
             )}
           </button>
-          <a
-            href="/activity"
-            title="Activity Planner"
-            aria-label="Activity Planner"
-            aria-current={pathname === "/activity" ? "page" : undefined}
+          <button
+            onClick={() => setRightPanelOpen((v) => !v)}
+            title={rightPanelOpen ? "Hide activity panel" : "Show activity panel"}
+            aria-label={rightPanelOpen ? "Hide activity panel" : "Show activity panel"}
+            aria-pressed={rightPanelOpen}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               width: 36, height: 36, padding: 0,
-              background: "none", border: "none", borderRight: "1px solid var(--border)",
-              color: pathname === "/activity" ? "var(--text)" : "var(--text-muted)",
+              background: rightPanelOpen ? "var(--bg-selected)" : "none",
+              border: "none", borderRight: "1px solid var(--border)",
+              color: rightPanelOpen ? "var(--text)" : "var(--text-muted)",
               cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
-              textDecoration: "none",
             }}
             onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = pathname === "/activity" ? "var(--text)" : "var(--text-muted)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = rightPanelOpen ? "var(--text)" : "var(--text-muted)"; }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" />
               <circle cx="12" cy="12" r="6" />
               <circle cx="12" cy="12" r="2" />
             </svg>
-          </a>
+          </button>
           {showChat && (
             <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
               <BranchNavigator
@@ -613,60 +587,23 @@ export function AppShell() {
         </div>
       </div>
 
-      {/* Right panel: file viewer — always mounted, width animated via CSS */}
-      <div
-        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          borderLeft: "1px solid var(--border)",
-          background: "var(--bg)",
-        }}
-      >
-        {/* Right panel tab bar */}
-        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36 }}>
+      {/* Right panel: ActivityPanelWrapper (or placeholder) — always mounted, width animated via CSS */}
+      {rightPanel && (
+        <div
+          className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            borderLeft: "1px solid var(--border)",
+            background: "var(--bg)",
+          }}
+        >
           <div style={{ flex: 1, overflow: "hidden" }}>
-            <TabBar
-              tabs={fileTabs}
-              activeTabId={activeFileTabId ?? ""}
-              onSelectTab={setActiveFileTabId}
-              onCloseTab={handleCloseFileTab}
-            />
+            {rightPanel}
           </div>
-
         </div>
-
-        {/* File content */}
-        <div style={{ flex: 1, overflow: "hidden" }}>
-          {activeFileTab?.filePath ? (
-            <FileViewer filePath={activeFileTab.filePath} cwd={activeCwd ?? undefined} />
-          ) : (
-            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
-              No file open
-            </div>
-          )}
-        </div>
-      </div>
+      )}
     </div>
-    {/* File panel toggle — always visible at top-right */}
-    <button
-      onClick={() => setRightPanelOpen((v) => !v)}
-      title={rightPanelOpen ? "Hide file panel" : "Show file panel"}
-      style={{
-        position: "fixed", top: 0, right: 0, zIndex: 300,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        width: 36, height: 36, padding: 0,
-        background: "var(--bg-panel)", border: "none", borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
-        color: rightPanelOpen ? "var(--text)" : "var(--text-muted)",
-        cursor: "pointer", transition: "color 0.12s",
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.color = rightPanelOpen ? "var(--text)" : "var(--text-muted)"; }}
-    >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
-      </svg>
-    </button>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {skillsConfigOpen && (activeCwd ?? selectedSession?.cwd ?? newSessionCwd) && (
       <SkillsConfig cwd={(activeCwd ?? selectedSession?.cwd ?? newSessionCwd)!} onClose={() => setSkillsConfigOpen(false)} />
