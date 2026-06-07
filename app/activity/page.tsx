@@ -173,7 +173,6 @@ export default function ActivityPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="输入活动需求…"
-              disabled={!!activity.sessionId}
               style={{
                 flex: 1, resize: "none", minHeight: 60, maxHeight: 120,
                 background: "var(--bg)", color: "var(--text)",
@@ -181,9 +180,16 @@ export default function ActivityPage() {
                 padding: "8px 12px", fontSize: 13, fontFamily: "inherit",
               }}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && canStart) {
-                  e.preventDefault();
-                  if (cwd && model) void activity.startSession(cwd, input, model);
+                if (e.key === "Enter" && !e.shiftKey) {
+                  if (activity.sessionId) {
+                    if (input.trim() && !activity.agentRunning) {
+                      e.preventDefault();
+                      void activity.sendMessage(input);
+                    }
+                  } else if (canStart && cwd && model) {
+                    e.preventDefault();
+                    void activity.startSession(cwd, input, model);
+                  }
                 }
               }}
             />
@@ -248,14 +254,18 @@ export default function ActivityPage() {
           </div>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
-          {activity.error ? (
-            <div style={{ padding: 16, color: "#ef4444", fontSize: 12 }}>错误: {activity.error}</div>
-          ) : (
-            <>
-              <UserPreferencesPanel />
-              <ActivityPanel planState={activity.planState} toolCalls={activity.toolCalls} />
-            </>
+          {activity.error && (
+            <div style={{
+              padding: "10px 12px", marginBottom: 12,
+              color: "#ef4444", background: "rgba(239,68,68,0.1)",
+              border: "1px solid rgba(239,68,68,0.3)",
+              borderRadius: 8, fontSize: 12,
+            }}>
+              错误: {activity.error}
+            </div>
           )}
+          <UserPreferencesPanel />
+          <ActivityPanel planState={activity.planState} toolCalls={activity.toolCalls} />
         </div>
       </div>
     </div>
