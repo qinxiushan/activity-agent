@@ -42,6 +42,7 @@ export interface ActivityState {
   toolCalls: ActivityToolCall[];
   planState: ActivityPlanState | null;
   error: string | null;
+  planStateError: string | null;
 }
 
 const INITIAL: ActivityState = {
@@ -51,6 +52,7 @@ const INITIAL: ActivityState = {
   toolCalls: [],
   planState: null,
   error: null,
+  planStateError: null,
 };
 
 interface RawEvent {
@@ -75,11 +77,14 @@ function summarizeResult(result: unknown, max = 80): string {
   }
 }
 
+const PLAN_POLL_ERROR_THRESHOLD = 3;
+
 export interface UseActivitySessionResult extends ActivityState {
   startSession: (cwd: string, message: string, model: { provider: string; modelId: string }) => Promise<void>;
   sendMessage: (message: string) => Promise<void>;
   abort: () => Promise<void>;
   reset: () => void;
+  retryPlanPoll: () => Promise<void>;
 }
 
 export function useActivitySession(serverBase = ""): UseActivitySessionResult {
@@ -90,6 +95,7 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
   const inFlightSendRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const planPollErrorCountRef = useRef(0);
 
   const stopPlanPoll = useCallback(() => {
     if (planPollRef.current) {
@@ -107,20 +113,51 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
 
   const startPlanPoll = useCallback((sid: string) => {
     stopPlanPoll();
+    planPollErrorCountRef.current = 0;
     const fetchOnce = async (): Promise<void> => {
       try {
         const r = await fetch(`${serverBase}/api/plan-state/${encodeURIComponent(sid)}`, { cache: "no-store" });
         if (r.ok) {
+          planPollErrorCountRef.current = 0;
           const d = (await r.json()) as ActivityPlanState;
-          setState((prev) => (prev.planState?.phase === d.phase && prev.planState?.turnCount === d.turnCount
-            ? prev
-            : { ...prev, planState: d }));
+          setState((prev) => {
+            const noChange = prev.planState?.phase === d.phase && prev.planState?.turnCount === d.turnCount;
+            if (noChange && prev.planStateError === null) return prev;
+            return { ...prev, planState: noChange ? prev.planState : d, planStateError: null };
+          });
+          return;
         }
-      } catch { /* ignore */ }
+        const count = ++planPollErrorCountRef.current;
+        if (count === PLAN_POLL_ERROR_THRESHOLD) {
+          setState((prev) => ({ ...prev, planStateError: `phase 数据可能过期 (HTTP ${r.status})` }));
+        }
+      } catch (e) {
+        const count = ++planPollErrorCountRef.current;
+        if (count === PLAN_POLL_ERROR_THRESHOLD) {
+          setState((prev) => ({ ...prev, planStateError: `phase 数据可能过期 (${(e as Error).message ?? "网络错误"})` }));
+        }
+      }
     };
     void fetchOnce();
     planPollRef.current = setInterval(() => { void fetchOnce(); }, 1500);
   }, [serverBase, stopPlanPoll]);
+
+  const retryPlanPoll = useCallback(async () => {
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    try {
+      const r = await fetch(`${serverBase}/api/plan-state/${encodeURIComponent(sid)}`, { cache: "no-store" });
+      if (r.ok) {
+        planPollErrorCountRef.current = 0;
+        const d = (await r.json()) as ActivityPlanState;
+        setState((prev) => ({ ...prev, planState: d, planStateError: null }));
+      } else {
+        setState((prev) => ({ ...prev, planStateError: `phase 数据可能过期 (HTTP ${r.status})` }));
+      }
+    } catch (e) {
+      setState((prev) => ({ ...prev, planStateError: `phase 数据可能过期 (${(e as Error).message ?? "网络错误"})` }));
+    }
+  }, [serverBase]);
 
   const connectEvents = useCallback((sid: string) => {
     cancelReconnect();
@@ -269,9 +306,10 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
     esRef.current?.close();
     esRef.current = null;
     stopPlanPoll();
+    planPollErrorCountRef.current = 0;
     sessionIdRef.current = null;
     setState(INITIAL);
   }, [stopPlanPoll, cancelReconnect]);
 
-  return { ...state, startSession, sendMessage, abort, reset };
+  return { ...state, startSession, sendMessage, abort, reset, retryPlanPoll };
 }

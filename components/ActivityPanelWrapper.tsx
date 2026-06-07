@@ -125,6 +125,26 @@ export function ActivityPanelWrapper() {
             错误: {activity.error}
           </div>
         )}
+        {activity.planStateError && (
+          <div style={{
+            padding: "6px 10px", marginBottom: 10,
+            color: "#ef4444", background: "rgba(239,68,68,0.08)",
+            border: "1px solid rgba(239,68,68,0.25)",
+            borderRadius: 6, fontSize: 10,
+            display: "flex", alignItems: "center", gap: 8,
+          }}>
+            <span style={{ flex: 1 }}>{activity.planStateError}</span>
+            <button
+              onClick={() => void activity.retryPlanPoll()}
+              title="立即重试 plan-state 请求"
+              style={{
+                background: "none", border: "1px solid rgba(239,68,68,0.4)",
+                color: "#ef4444", padding: "1px 8px", borderRadius: 4, fontSize: 10,
+                cursor: "pointer", flexShrink: 0,
+              }}
+            >重试</button>
+          </div>
+        )}
         {activity.messages.length === 0 && !activity.sessionId && (
           <div style={{ textAlign: "center", color: "var(--text-dim)", padding: "32px 12px" }}>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>开始一个活动规划</div>
