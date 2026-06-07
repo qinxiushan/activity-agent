@@ -249,10 +249,6 @@ export default function ActivityPage() {
         <div style={{ flex: 1, overflowY: "auto", padding: "12px" }}>
           {activity.error ? (
             <div style={{ padding: 16, color: "#ef4444", fontSize: 12 }}>错误: {activity.error}</div>
-          ) : !activity.sessionId ? (
-            <div style={{ textAlign: "center", color: "var(--text-dim)", padding: "60px 20px", fontSize: 12 }}>
-              左侧发送消息后，阶段进度 + 工具调用 + 方案时间线会实时显示在这里
-            </div>
           ) : (
             <ActivityPanel planState={activity.planState} toolCalls={activity.toolCalls} />
           )}
