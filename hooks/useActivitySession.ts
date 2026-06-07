@@ -87,6 +87,7 @@ export interface UseActivitySessionResult extends ActivityState {
   abort: () => Promise<void>;
   reset: () => void;
   retryPlanPoll: () => Promise<void>;
+  trackSession: (sessionId: string) => void;
 }
 
 export function useActivitySession(serverBase = ""): UseActivitySessionResult {
@@ -317,5 +318,17 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
     setState(INITIAL);
   }, [stopPlanPoll, cancelReconnect]);
 
-  return { ...state, startSession, sendMessage, abort, reset, retryPlanPoll };
+  const trackSession = useCallback((sid: string) => {
+    sessionIdRef.current = sid;
+    setState((prev) => ({
+      ...INITIAL,
+      sessionId: sid,
+      messages: prev.messages,
+      toolCalls: prev.toolCalls,
+    }));
+    connectEvents(sid);
+    startPlanPoll(sid);
+  }, [connectEvents, startPlanPoll]);
+
+  return { ...state, startSession, sendMessage, abort, reset, retryPlanPoll, trackSession };
 }
