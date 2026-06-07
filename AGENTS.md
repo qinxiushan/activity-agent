@@ -157,6 +157,8 @@ lib/
                            + autoFillIntent() called by intent_parse when critical
                            fields are missing; recordCompletedSession() called by
                            plan_save on phase → completed
+  user-context.ts          OS-derived userId resolution (os.userInfo().username;
+                           fallback to DEFAULT_USER_ID); used by API routes + tools
   session-reader.ts        parse .jsonl; getModelList/getDefaultModel
   types.ts                 shared TypeScript types
   normalize.ts             normalizeToolCalls()
