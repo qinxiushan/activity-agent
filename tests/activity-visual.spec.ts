@@ -6,8 +6,8 @@ const SCREENSHOT_DIR = join(process.cwd(), "tests", "__screenshots__");
 mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
 /**
- * Visual regression for /activity page.
- * Captures: light mode, dark mode, and a sample prompt being typed.
+ * Visual regression for the activity panel (right side of home page).
+ * Captures: light mode, dark mode, and a typed prompt in the activity textarea.
  *
  * Run prerequisites:
  *   1. Start dev server: npm run dev (port 30142)
@@ -16,11 +16,8 @@ mkdirSync(SCREENSHOT_DIR, { recursive: true });
  */
 test.describe("Activity page visual", () => {
   test("light mode — empty state", async ({ page }) => {
-    await page.goto("/activity");
-    // Wait for the activity panel header to render (signals client hydration)
+    await page.goto("/");
     await expect(page.locator("text=Activity Panel")).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator("text=SOP-v2 阶段进度")).toBeVisible();
-    // Ensure light mode
     await page.evaluate(() => {
       document.documentElement.classList.remove("dark");
       try { localStorage.setItem("pi-theme", "light"); } catch {}
@@ -33,7 +30,7 @@ test.describe("Activity page visual", () => {
   });
 
   test("dark mode — empty state", async ({ page }) => {
-    await page.goto("/activity");
+    await page.goto("/");
     await expect(page.locator("text=Activity Panel")).toBeVisible({ timeout: 10_000 });
     // Force dark mode via theme toggle
     await page.locator('button[aria-label="Switch to dark mode"]').click();
@@ -49,21 +46,16 @@ test.describe("Activity page visual", () => {
     expect(stored).toBe("dark");
   });
 
-  test("light mode — sample prompt + phase progress visible", async ({ page }) => {
-    await page.goto("/activity");
+  test("light mode — activity textarea accepts typed prompt", async ({ page }) => {
+    await page.goto("/");
     await expect(page.locator("text=Activity Panel")).toBeVisible({ timeout: 10_000 });
-    // Force light mode
     await page.evaluate(() => {
       document.documentElement.classList.remove("dark");
       try { localStorage.setItem("pi-theme", "light"); } catch {}
     });
-    // Click first sample prompt chip
-    const firstSample = page.locator("button").filter({ hasText: /想和女朋友/ }).first();
-    await firstSample.click();
-    await page.waitForTimeout(200);
-    // Verify the textarea got populated
-    const textarea = page.locator("textarea");
-    await expect(textarea).toHaveValue(/想和女朋友/);
+    const activityTextarea = page.locator("textarea").last();
+    await activityTextarea.fill("想和女朋友周六(2026-07-11)去玩");
+    await expect(activityTextarea).toHaveValue(/想和女朋友/);
     await page.screenshot({
       path: join(SCREENSHOT_DIR, "activity-light-with-prompt.png"),
       fullPage: true,
@@ -71,7 +63,7 @@ test.describe("Activity page visual", () => {
   });
 
   test("phase progress component renders all 7 phase labels", async ({ page }) => {
-    await page.goto("/activity");
+    await page.goto("/");
     await expect(page.locator("text=Activity Panel")).toBeVisible({ timeout: 10_000 });
     // Phase labels from PhaseProgress.tsx
     const expectedLabels = ["待命", "意图捕获", "追问", "自动规划", "等待确认", "执行预订", "完成"];
@@ -83,7 +75,7 @@ test.describe("Activity page visual", () => {
 
 test.describe("User Preferences Panel", () => {
   test("renders empty-state when no prefs exist", async ({ page }) => {
-    await page.goto("/activity");
+    await page.goto("/");
     await expect(page.locator("text=Activity Panel")).toBeVisible({ timeout: 10_000 });
     await expect(page.locator("text=用户偏好")).toBeVisible();
     await expect(page.locator("text=/方案 \\d+ · 预订 \\d+/")).toBeVisible();
@@ -94,7 +86,7 @@ test.describe("User Preferences Panel", () => {
   });
 
   test("refresh button triggers /api/user-preferences POST and re-renders", async ({ page }) => {
-    await page.goto("/activity");
+    await page.goto("/");
     await expect(page.locator("text=用户偏好")).toBeVisible({ timeout: 10_000 });
     const refreshBtn = page.locator('button[title*="重新计算"]');
     const reqPromise = page.waitForRequest(
@@ -108,7 +100,7 @@ test.describe("User Preferences Panel", () => {
   });
 
   test("panel renders in dark mode without contrast issues", async ({ page }) => {
-    await page.goto("/activity");
+    await page.goto("/");
     await expect(page.locator("text=用户偏好")).toBeVisible({ timeout: 10_000 });
     await page.locator('button[aria-label="Switch to dark mode"]').click();
     await page.waitForFunction(() => document.documentElement.classList.contains("dark"));
@@ -121,7 +113,7 @@ test.describe("User Preferences Panel", () => {
   });
 
   test("expandable recent-intents section toggles", async ({ page }) => {
-    await page.goto("/activity");
+    await page.goto("/");
     await expect(page.locator("text=用户偏好")).toBeVisible({ timeout: 10_000 });
     const toggle = page.locator('button:has-text("最近")').first();
     const exists = await toggle.count();
