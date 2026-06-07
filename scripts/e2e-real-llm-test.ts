@@ -340,6 +340,36 @@ async function main(): Promise<void> {
   const bobFinal = await fetch(`${SERVER_BASE}/api/user-preferences?userId=${bobId}`).then((r) => r.json()) as { preferences: { defaults: Record<string, unknown> } };
   ok("bob still isolated after alice reset", Object.keys(bobFinal.preferences.defaults).length === 0);
 
+  section("🔐 v3 header/cookie auth");
+  const daveId = `e2e-dave-${Date.now()}`;
+
+  const devLoginRes = await fetch(`${SERVER_BASE}/api/dev-login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId: daveId }),
+  });
+  const setCookieHeader = devLoginRes.headers.get("set-cookie") ?? "";
+  ok("dev-login POST returns ok", devLoginRes.ok);
+  ok("dev-login POST sets pi_user cookie", setCookieHeader.includes("pi_user=") && setCookieHeader.includes(daveId));
+
+  const headerRead = await fetch(`${SERVER_BASE}/api/user-preferences`, {
+    headers: { "X-User-Id": "e2e-header-user" },
+  }).then((r) => r.json()) as { preferences: { userId: string } };
+  ok("X-User-Id header overrides", headerRead.preferences.userId === "e2e-header-user");
+
+  const cookieRead = await fetch(`${SERVER_BASE}/api/user-preferences`, {
+    headers: { Cookie: `pi_user=${daveId}` },
+  }).then((r) => r.json()) as { preferences: { userId: string } };
+  ok("pi_user cookie overrides", cookieRead.preferences.userId === daveId);
+
+  const bothRead = await fetch(`${SERVER_BASE}/api/user-preferences`, {
+    headers: { "X-User-Id": "e2e-header-wins", Cookie: `pi_user=${daveId}` },
+  }).then((r) => r.json()) as { preferences: { userId: string } };
+  ok("X-User-Id header beats pi_user cookie", bothRead.preferences.userId === "e2e-header-wins");
+
+  const noAuthRead = await fetch(`${SERVER_BASE}/api/user-preferences`).then((r) => r.json()) as { preferences: { userId: string } };
+  ok("no auth: OS-derived userId (non-empty string)", typeof noAuthRead.preferences.userId === "string" && noAuthRead.preferences.userId.length > 0);
+
   let currentTurn = 1;
 
   const turns: ToolCallRecord[][] = [[]];
