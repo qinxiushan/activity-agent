@@ -130,6 +130,7 @@ app/api/
   files/[...path]/route.ts        GET file contents for viewer
   models/route.ts                 GET { models, modelList, defaultModel }
   models-config/route.ts          GET/POST — read/write ~/.pi/agent/models.json
+  user-preferences/route.ts       GET/PUT/POST — read/edit/refresh user preference memory
 
 app/
   layout.tsx            Root layout, dark/light theme bootstrap
@@ -152,6 +153,10 @@ lib/
   route-service.ts         Haversine + transit time (walking/transit/driving)
   opening-hours-service.ts Parse opening hours string + open/close check
   tool-wrapper.ts          Generic retry/timeout/fallback/metrics wrapper
+  user-preferences.ts      Cross-session memory: defaults derived from history,
+                           + autoFillIntent() called by intent_parse when critical
+                           fields are missing; recordCompletedSession() called by
+                           plan_save on phase → completed
   session-reader.ts        parse .jsonl; getModelList/getDefaultModel
   types.ts                 shared TypeScript types
   normalize.ts             normalizeToolCalls()
@@ -173,11 +178,14 @@ components/
     ToolTimeline.tsx       Tool call waterfall with name/icon/duration
     BookingCard.tsx        Order confirmation card (extracted from reservation_exec result)
     ActivityPanel.tsx      Composes the four components
+  UserPreferencesPanel.tsx Right-rail card showing learned defaults (party size,
+                           budget, departure, …) + stats + recent sessions.
+                           Refresh / reset buttons hit /api/user-preferences.
 hooks/
   useActivitySession.ts    Minimal SSE + plan-state polling hook (separate from useAgentSession)
 
 scripts/
-  p0-smoke-test.ts         Unit + integration tests (94 assertions, no API)
+  p0-smoke-test.ts         Unit + integration tests (126 assertions, no API)
   e2e-real-llm-test.ts     Real LLM end-to-end test (requires API key)
 ```
 

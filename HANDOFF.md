@@ -1,10 +1,10 @@
 # Activity Agent — Handoff Document
 
-> Status as of 2026-06-06. Read this before continuing the project.
+> Status as of 2026-06-07. Read this before continuing the project.
 
 ## TL;DR
 
-SOP-v2 (8-phase, 12-tool, single-confirm + 1-clarify) is **complete and verified end-to-end** against a real LLM. 17 atomic git commits, 80 files, ~37k LOC. `/activity` UI page shipped with phase progress, plan timeline, tool waterfall, and booking card. 94/94 smoke + 24/24 e2e tests pass. The codebase is in a good state to pause or extend.
+SOP-v2 (8-phase, 12-tool, single-confirm + 1-clarify) is **complete and verified end-to-end** against a real LLM. ~85 files, ~40k LOC. `/activity` UI page shipped with phase progress, plan timeline, tool waterfall, booking card, and user-preferences panel. **126/126 smoke + 24/24 e2e tests pass.** Cross-session user-preference memory is wired (defaults derived from history, auto-fills `intent_parse` on missing critical fields, records completed sessions). The codebase is in a good state to pause or extend.
 
 A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.agents/skills/phase-gated-agent/SKILL.md` (see "Reusable artifacts" below).
 
@@ -17,19 +17,26 @@ A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.a
 - **submitPlan defense** — `intent_parse` body self-validates `submitPlan:true` is only legal in `planning` (layer 3 defense in depth).
 - **1-clarify hard limit** — `MAX_CLARIFICATIONS = 1`. `ask_clarification` body rejects the 2nd call.
 - **Plan state persistence** — `~/.pi/agent/plan-states/<sessionId>.json` written on every transition via a write queue.
+- **User-preference memory** — `lib/user-preferences.ts`. Per-user JSON at `~/.pi/agent/user-profiles/<userId>.json`. `autoFillIntent()` is called from `intent_parse` when critical fields (date/startTime/partySize/departurePoint/budgetPerPerson) are missing, filling them from the user's learned defaults and reporting `autoFilledFields` in the tool result so the LLM can announce the fill to the user. `recordCompletedSession()` is called from `plan_save` on phase `executing → completed`, appending to the recent-sessions ring buffer (capped at 5, de-duped by sessionId). `refreshFromHistory()` re-derives all defaults from the full plan-state directory (≥50% occurrence threshold) and recomputes favorite restaurants from the booking service.
 - **Real services** — POI database (34 entries), deterministic weather, route calculator, opening hours parser, booking state machine. All mock APIs designed for swap-in with 高德 / 和风 / 大众点评.
 
 ### Frontend (verified)
 - **Generic pi-web shell** at `/` — 14 React components, full session management, file viewer, etc. (preexisting, untouched).
 - **Activity-specific UI** at `/activity` — NEW. 2-pane layout: chat left, activity panel right.
+  - **UserPreferencesPanel** (NEW) — right-rail card above the activity panel. Shows learned defaults (人数 / 预算 / 出发地 / 偏好品类 / 饮食限制 / 氛围) as a 2-col grid, stats (方案数 · 预订数 · 上次更新), expandable recent-intents list, and Refresh / Reset buttons. Polls every 5s so the panel updates live as sessions complete.
   - **PhaseProgress** — 8-step horizontal bar with current-phase glow, completed checkmarks, status pill ("turn N · clarification M/1").
   - **PlanTimeline** — vertical timeline of plan legs (departure/transit/activity/meal icons + colors), weather summary, totals (duration/cost/legs).
   - **ToolTimeline** — waterfall of all tool calls with name/icon/args/duration, red BLOCKED badge for `PHASE_GUARD` hits.
   - **BookingCard** — gradient-tinted order confirmation (restaurant/date/time/party/确认码/订单号), extracted from `reservation_exec` / `query_booking` results.
-- **API for plan state** — `GET /api/plan-state/[id]`. Powers the UI's 1.5s polling.
+- **APIs** —
+  - `GET /api/plan-state/[id]` — UI's 1.5s polling.
+  - `GET /api/user-preferences` — read defaults + stats.
+  - `PUT /api/user-preferences` — manually edit defaults (partial).
+  - `POST /api/user-preferences` — `action=refresh|reset` for full re-derive or full clear.
 
 ### Tests (verified)
-- `scripts/p0-smoke-test.ts` — **94/94 pass** (was 90, +2 for `submitPlan` rejection, +2 for `retry_booking` assertions). No API key needed.
+- `scripts/p0-smoke-test.ts` — **126/126 pass** (was 94, +32 for the new `🧠 P0-5: User Preferences Store` section covering empty store, updateDefaults, autoFillIntent overwrite/no-op, recordCompletedSession de-dupe/cap, reset, refreshFromHistory with empty + populated + outlier plan-state dirs, and disk persistence). No API key needed.
+- `tests/activity-visual.spec.ts` — Playwright visual regression (light + dark + sample prompt + 7 phase labels). Now also includes 4 new tests for the `User Preferences Panel` (empty state, refresh button POST, dark mode contrast, recent-intents toggle).
 - `scripts/e2e-real-llm-test.ts` — **24/24 pass** against `deepseek/deepseek-v4-pro`. Real LLM, real booking, real confirmation code.
 
 ## What's NOT done
@@ -37,9 +44,8 @@ A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.a
 Out of scope for the current milestone:
 
 - **Real API integration** (高德/和风/大众点评) — mock services work but are deterministic. Needs API keys + ¥ + production hardening.
-- **User profile / memory** — no persistence of preferences (素食/无烟/历史去过) across sessions. P1 in `BUSINESS_ANALYSIS_REPORT.md`.
 - **Multi-day trip support** — current SOP is single-day. State machine would need extension.
-- **Production auth / rate limiting** — dev server only.
+- **Production auth / rate limiting / multi-user** — dev server only, single `default` user ID for preferences. AuthN would be the trigger to wire `userId` end-to-end.
 - **i18n** — UI is Chinese-only, prompt is Chinese-only.
 - **Cost / metrics dashboard** — token usage is collected but not surfaced in the UI.
 - **Hard-constraint enforcement** — current constraints (date, budget, party size) are in the prompt. A future "hard mode" should put them in `PlanStateManager` as gates that block `plan_save` if violated.
@@ -49,6 +55,8 @@ Out of scope for the current milestone:
 - **`~/.agents/skills/phase-gated-agent/SKILL.md`** — Skill capturing the SOP-v2 design pattern. Use it as a starting point for any new agent that needs strict workflow enforcement. Covers: 8-phase design, 3-layer defense (TOOL_PHASE_RULES + PHASE_TRANSITIONS + tool-body self-check), persistence pattern, common pitfalls, and a quick checklist.
 
 - **`lib/plan-state.ts` + `src/tools/activity-tools.ts`** — Drop-in reference implementation. Adapt the 12 tools to your domain (replace POI/weather/booking with your domain's data + side effects), keep the phase machine.
+
+- **`lib/user-preferences.ts` + `components/UserPreferencesPanel.tsx`** — Reference pattern for cross-session memory: derive defaults from history (≥50% threshold), auto-fill on intake, record on completion, expose manual refresh/reset via API. Drop-in for any SOP-driven agent that wants to reduce clarification rounds.
 
 - **`scripts/e2e-real-llm-test.ts` + `hooks/useActivitySession.ts`** — E2E test + UI hook pattern. The HTTP-client-e2e sidesteps the `pi-coding-agent@0.75.5` CJS exports issue (its `package.json` exports only `"import"`, no CJS condition — `tsx@4.x` CJS register fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`).
 
@@ -61,11 +69,15 @@ Out of scope for the current milestone:
 | Tool wrapper (retry/timeout/metrics) | `lib/tool-wrapper.ts` |
 | LLM prompt | `src/prompts/activity-planner.ts` |
 | Session orchestration (agent start, advancePlanPhase) | `lib/rpc-manager.ts` |
+| User-preference memory (auto-fill + record) | `lib/user-preferences.ts` |
 | API for plan state (UI polling) | `app/api/plan-state/[id]/route.ts` |
+| API for user preferences (GET/PUT/refresh/reset) | `app/api/user-preferences/route.ts` |
 | Activity UI page | `app/activity/page.tsx` |
 | Activity panel components | `components/activity/*.tsx` |
+| User-preferences panel | `components/UserPreferencesPanel.tsx` |
 | Activity session hook (SSE + poll) | `hooks/useActivitySession.ts` |
 | Smoke test | `scripts/p0-smoke-test.ts` |
+| Playwright visual test | `tests/activity-visual.spec.ts` |
 | E2E test | `scripts/e2e-real-llm-test.ts` |
 | Project knowledge base | `AGENTS.md` |
 | Tech report | `INTEGRATION_REPORT.md` (1175 lines) |
