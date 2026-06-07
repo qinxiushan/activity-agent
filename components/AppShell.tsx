@@ -202,11 +202,6 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
     }
   }, [selectedSession, router]);
 
-  // TODO: file viewer dropped in 3-column merge — SessionSidebar still calls onOpenFile,
-  // but the right panel now hosts ActivityPanelWrapper. To restore: re-add FileViewer +
-  // TabBar imports, fileTabs/activeFileTabId state, and a right-panel header with TabBar.
-  const handleOpenFile = useCallback((_filePath: string, _fileName: string) => {}, []);
-
   // Show chat area if a session is selected, or if we have a cwd to start a new session in
   const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
   const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
@@ -225,7 +220,6 @@ export function AppShell({ rightPanel = null }: { rightPanel?: ReactNode }) {
         onSessionDeleted={handleSessionDeleted}
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
         onCwdChange={handleCwdChange}
-        onOpenFile={handleOpenFile}
         explorerRefreshKey={explorerRefreshKey}
         onAtMention={handleAtMention}
       />
