@@ -26,9 +26,11 @@
 
 SSE 投递 `message_end` / `tool_execution_start` / `tool_execution_end`,plan-state 1.5s 轮询读到的内容大部分 SSE 事件也覆盖了。**轮询可能冗余**,但目前仍作为 SSE 断开时的兜底保留(有用但可能过度)。
 
-## 4. UI 中看不到用户身份  [未解决]
+## 4. UI 中看不到用户身份  [已解决]
 
-`lib/user-context.ts: getCurrentUserIdFromRequest()` 解析 userId,`UserPreferencesPanel` 隐式显示,但 UI **从不**显式展示「你是 alice」之类。Header 加个身份小标签更清楚。`/api/dev-login` 是 dev-only — UI 上加个「dev 模式」提示能避免误用。
+解决:commit `56b258b` 加了:
+- `app/api/whoami/route.ts` — 解析 userId(header > cookie > os),cookie 源标记 `isDev: true`(cookie 只能由 `/api/dev-login` 设,等同 dev 模式)
+- `components/AppShell.tsx` — 顶栏加 useState/useEffect 拉取,渲染 identity badge(绝对定位 `right: 12/48`,无论 session stats 是否显示都贴在最右)。正常态:彩点 + userId;dev 模式:红点 + userId + 红色 "DEV" 标签
 
 ## 5. 错误暴露  [未解决]
 
