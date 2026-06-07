@@ -21,6 +21,7 @@ export function ActivityPanelWrapper() {
   const [cwd, setCwd] = useState<string | null>(null);
   const [model, setModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [modelList, setModelList] = useState<ModelInfo[]>([]);
+  const [aborting, setAborting] = useState(false);
   const activity = useActivitySession();
 
   useEffect(() => {
@@ -54,6 +55,16 @@ export function ActivityPanelWrapper() {
     setInput("");
   };
 
+  const handleAbort = async () => {
+    if (aborting) return;
+    setAborting(true);
+    try {
+      await activity.abort();
+    } finally {
+      setAborting(false);
+    }
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       <div style={{
@@ -79,13 +90,26 @@ export function ActivityPanelWrapper() {
             >新会话</button>
           )}
           {activity.agentRunning && (
-            <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "var(--accent)" }}>
-              <span style={{
-                width: 5, height: 5, borderRadius: "50%", background: "var(--accent)",
-                animation: "pulse 1.5s infinite",
-              }} />
-              LLM 工作中
-            </span>
+            <>
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "var(--accent)" }}>
+                <span style={{
+                  width: 5, height: 5, borderRadius: "50%", background: "var(--accent)",
+                  animation: "pulse 1.5s infinite",
+                }} />
+                LLM 工作中
+              </span>
+              <button
+                onClick={handleAbort}
+                disabled={aborting}
+                title="停止当前 LLM 任务"
+                style={{
+                  background: "none", border: "1px solid var(--border)",
+                  color: aborting ? "var(--text-dim)" : "#ef4444",
+                  padding: "2px 8px", borderRadius: 6, fontSize: 10,
+                  cursor: aborting ? "default" : "pointer",
+                }}
+              >{aborting ? "停止中" : "停止"}</button>
+            </>
           )}
         </div>
       </div>
