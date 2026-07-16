@@ -1,3 +1,9 @@
+// 启用扩展 prompt caching（Anthropic 1h / OpenAI 24h）
+// 缓存命中时 token 成本降低 ~90%，在 SDK 加载前设置确保生效
+if (!process.env.PI_CACHE_RETENTION) {
+  process.env.PI_CACHE_RETENTION = "long";
+}
+
 import { createAgentSession, SessionManager, DefaultResourceLoader, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ResourceLoader } from "@earendil-works/pi-coding-agent";
 import { cacheSessionPath } from "./session-reader";

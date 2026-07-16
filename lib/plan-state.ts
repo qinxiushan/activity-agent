@@ -17,7 +17,7 @@
  * - 无全局单例：PlanStateManager 通过闭包注入到每个 session 的工具中
  */
 
-import { promises as fs } from "node:fs";
+import { promises as fsPromises, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -135,8 +135,6 @@ export const MAX_CLARIFICATIONS = 1;
 export class PlanStateManager {
   private readonly state: PlanState;
   private readonly storageDir: string;
-  private writeQueue: Promise<void> = Promise.resolve();
-
   constructor(sessionId: string, storageDir?: string) {
     this.state = {
       sessionId,
@@ -183,7 +181,7 @@ export class PlanStateManager {
     this.state.phase = to;
     this.state.lastTransitionAt = Date.now();
     this.state.history.push({ phase: to, at: Date.now(), reason: reason ?? `from ${from}` });
-    await this.persist();
+    this.persist(); // 同步写，调用返回时数据已落盘
     return { ok: true };
   }
 
@@ -227,17 +225,23 @@ export class PlanStateManager {
     this.state.history.push({ phase: "idle", at: Date.now(), reason: "reset" });
   }
 
-  private async persist(): Promise<void> {
-    this.writeQueue = this.writeQueue.then(async () => {
-      try {
-        await fs.mkdir(this.storageDir, { recursive: true });
-        const file = path.join(this.storageDir, `${this.state.sessionId}.json`);
-        await fs.writeFile(file, JSON.stringify(this.state, null, 2), "utf-8");
-      } catch (e) {
-        console.error(`[PlanStateManager] persist failed:`, e);
-      }
-    });
-    return this.writeQueue;
+  /**
+   * 将 plan-state 同步写入文件系统。
+   * 使用同步写（fs.writeFileSync）而非异步队列的原因：
+   * 1. plan-state JSON 通常 < 10KB，同步写性能可忽略
+   * 2. 同步写保证调用返回时数据已落盘——无丢失窗口
+   * 3. 错误向上传播，调用者（transition / tool execute）可感知失败
+   * 4. 消除了异步 writeQueue 链断裂导致后续写入静默丢失的风险
+   */
+  private persist(): void {
+    try {
+      mkdirSync(this.storageDir, { recursive: true });
+      const file = path.join(this.storageDir, `${this.state.sessionId}.json`);
+      writeFileSync(file, JSON.stringify(this.state, null, 2), "utf-8");
+    } catch (e) {
+      console.error(`[PlanStateManager] persist failed:`, e);
+      throw e;
+    }
   }
 
   static async load(sessionId: string, storageDir?: string): Promise<PlanStateManager> {
@@ -245,7 +249,7 @@ export class PlanStateManager {
     const mgr = new PlanStateManager(sessionId, dir);
     try {
       const file = path.join(dir, `${sessionId}.json`);
-      const content = await fs.readFile(file, "utf-8");
+      const content = await fsPromises.readFile(file, "utf-8");
       const data = JSON.parse(content) as PlanState;
       Object.assign(mgr.state, data);
     } catch {
