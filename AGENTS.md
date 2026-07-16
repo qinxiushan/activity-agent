@@ -6,27 +6,28 @@
 npm run dev                  # port 30142
 ```
 
-| Check | Command |
-|-------|---------|
-| Typecheck | `node_modules/.bin/tsc --noEmit` |
-| Unit + integration smoke (no API key) | `npm run test:smoke` |
-| Real LLM e2e — one-shot (auto-starts dev server) | `npm run e2e` |
-| Real LLM e2e — manual (server must be running) | `npm run e2e:real` |
-| Playwright visual | `npm run test:visual` |
+| Check                                             | Command                            |
+| ------------------------------------------------- | ---------------------------------- |
+| Typecheck                                         | `node_modules/.bin/tsc --noEmit` |
+| Unit + integration smoke (no API key)             | `npm run test:smoke`             |
+| Real LLM e2e — one-shot (auto-starts dev server) | `npm run e2e`                    |
+| Real LLM e2e — manual (server must be running)   | `npm run e2e:real`               |
+| Playwright visual                                 | `npm run test:visual`            |
 
 ## CI (GitHub Actions)
 
 Workflow file: **`.github/workflows/ci.yml`**
 
 <!-- TODO: replace OWNER/REPO with actual GitHub path after first push -->
+
 [![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
 
 Two jobs:
 
-| Job | Triggers | Needs secrets | What it runs | Timeout |
-|---|---|---|---|---|
-| **lint** | every push + PR | ❌ | `tsc --noEmit` + `npm run test:smoke` | 5 min |
-| **e2e** | push to `main` + manual dispatch | ✅ `DEEPSEEK_API_KEY` | full LLM e2e (auto-starts dev server) | 10 min |
+| Job            | Triggers                          | Needs secrets          | What it runs                              | Timeout |
+| -------------- | --------------------------------- | ---------------------- | ----------------------------------------- | ------- |
+| **lint** | every push + PR                   | ❌                     | `tsc --noEmit` + `npm run test:smoke` | 5 min   |
+| **e2e**  | push to`main` + manual dispatch | ✅`DEEPSEEK_API_KEY` | full LLM e2e (auto-starts dev server)     | 10 min  |
 
 **Setup after first `git push`**:
 
@@ -43,13 +44,14 @@ Two jobs:
 
 **改错了文件 = 改半天 LLM 没反应。** LLM 模型配置分布在 3 个文件里（不是 1 个）：
 
-| 文件 | 管什么 | 什么时候改 |
-|---|---|---|
-| `~/.pi/agent/settings.json` | 默认 provider + modelId | 想换默认模型时 |
-| `~/.pi/agent/auth.json` (0600) | **内置** provider 的 API key | 想用 deepseek/openai/anthropic 等官方 provider 时 |
-| `~/.pi/agent/models.json` (可选) | **自定义** provider/model + 备用 key | 想接自建 / 第三方 / 微调模型时 |
+| 文件                               | 管什么                                     | 什么时候改                                        |
+| ---------------------------------- | ------------------------------------------ | ------------------------------------------------- |
+| `~/.pi/agent/settings.json`      | 默认 provider + modelId                    | 想换默认模型时                                    |
+| `~/.pi/agent/auth.json` (0600)   | **内置** provider 的 API key         | 想用 deepseek/openai/anthropic 等官方 provider 时 |
+| `~/.pi/agent/models.json` (可选) | **自定义** provider/model + 备用 key | 想接自建 / 第三方 / 微调模型时                    |
 
 **经验法则**：
+
 1. 改默认模型 = `settings.json`
 2. 改 API key = `auth.json`（**不是** `models.json`）
 3. 改模型行为 / 加自定义 provider = `models.json`
@@ -73,6 +75,7 @@ Two jobs:
 ```
 
 **Hard constraints:**
+
 - **Single user confirmation** at `plan_confirm` (no intermediate "is this OK?")
 - **1-clarify limit** — `ask_clarification` can be invoked at most once per session
 - **Auto-planning** — LLM calls `get_weather` / `search_*` / `check_opening_hours` / `compute_route` without user interaction
@@ -80,20 +83,20 @@ Two jobs:
 
 ## 12 Tools (by phase)
 
-| Phase | Tool | Role |
-|-------|------|------|
-| 1 intent | `intent_parse` | Record structured intent **OR** submit final plan (`submitPlan: true`) |
-| 1 intent | `ask_clarification` | 1-shot clarifying question (硬限 1) |
-| 2 planning | `get_weather` | Weather forecast for the day |
-| 2 planning | `search_activities` | Activity POI query (real DB, 22 POIs) |
-| 2 planning | `search_restaurants` | Restaurant POI query (real DB, 12 POIs) |
-| 2 planning | `check_opening_hours` | Verify POI is open at planned time |
-| 2 planning | `compute_route` | Transit time between POIs (auto walking/transit/driving) |
-| 3 execution | `reservation_exec` | Real restaurant booking (state machine) |
-| 3 execution | `query_booking` | Check order status |
-| 3 execution | `retry_booking` | Retry failed order |
-| persist | `plan_save` | Save final plan |
-| persist | `plan_load` | Load historical plan |
+| Phase       | Tool                    | Role                                                                          |
+| ----------- | ----------------------- | ----------------------------------------------------------------------------- |
+| 1 intent    | `intent_parse`        | Record structured intent**OR** submit final plan (`submitPlan: true`) |
+| 1 intent    | `ask_clarification`   | 1-shot clarifying question (硬限 1)                                           |
+| 2 planning  | `get_weather`         | Weather forecast for the day                                                  |
+| 2 planning  | `search_activities`   | Activity POI query (real DB, 22 POIs)                                         |
+| 2 planning  | `search_restaurants`  | Restaurant POI query (real DB, 12 POIs)                                       |
+| 2 planning  | `check_opening_hours` | Verify POI is open at planned time                                            |
+| 2 planning  | `compute_route`       | Transit time between POIs (auto walking/transit/driving)                      |
+| 3 execution | `reservation_exec`    | Real restaurant booking (state machine)                                       |
+| 3 execution | `query_booking`       | Check order status                                                            |
+| 3 execution | `retry_booking`       | Retry failed order                                                            |
+| persist     | `plan_save`           | Save final plan                                                               |
+| persist     | `plan_load`           | Load historical plan                                                          |
 
 ## Architecture
 
@@ -197,11 +200,12 @@ scripts/
 ## Activity UI (`/activity` page)
 
 A purpose-built UI for activity planning — separate from the generic pi-web shell
-at `/`. Goes to the URL in your dev server: <http://localhost:30142/activity>.
+at `/`. Goes to the URL in your dev server: [http://localhost:30142/activity](http://localhost:30142/activity).
 
 **Layout**: 2-pane (chat left · activity panel right)
 
 **Activity panel** (right side) shows:
+
 1. **Phase progress** — 8-step horizontal bar (idle → intent_capture → clarifying → planning → plan_confirm → executing → completed), current phase highlighted, "turn N · clarification M/1" status
 2. **Booking card** — appears in `executing`/`completed` phase, extracted from `reservation_exec` / `query_booking` results (restaurant / date / time / 确认码 / 订单号)
 3. **Plan timeline** — vertical timeline of plan legs (departure 🚌 / transit 🚇 / activity 🎯 / meal 🍴 / rest ☕), weather summary, totals (duration / cost / legs)
@@ -213,16 +217,17 @@ at `/`. Goes to the URL in your dev server: <http://localhost:30142/activity>.
 shipping.
 
 **Data sources**:
+
 - SSE: `/api/agent/[id]/events` (tool_execution_start/end, message_end)
 - Plan state polling: `/api/plan-state/[id]` (every 1.5s)
 - Session create: `/api/agent/new`
 
 ## Session + Plan State Persistence
 
-| File | Location | Format |
-|------|----------|--------|
-| Session log | `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl` | JSONL events |
-| Plan state | `~/.pi/agent/plan-states/<sessionId>.json` | JSON snapshot |
+| File        | Location                                                        | Format        |
+| ----------- | --------------------------------------------------------------- | ------------- |
+| Session log | `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl` | JSONL events  |
+| Plan state  | `~/.pi/agent/plan-states/<sessionId>.json`                    | JSON snapshot |
 
 Plan state tracks: `phase`, `turnCount`, `clarificationCount`, `intent`, `plan`, `history`.
 
@@ -247,6 +252,7 @@ Plan state tracks: `phase`, `turnCount`, `clarificationCount`, `intent`, `plan`,
 ## Verification Recipes
 
 ### Smoke test (no API key)
+
 ```bash
 npx tsx scripts/p0-smoke-test.ts
 # Expected: 90/90 pass, exit 0
@@ -275,6 +281,7 @@ npm run e2e:real
 Override server URL if needed: `E2E_SERVER=http://localhost:30142 npm run e2e:real`.
 
 The e2e test:
+
 1. Reads `~/.pi/agent/models.json` (first model entry)
 2. Pings `${SERVER_BASE}/api/sessions` to confirm dev server is up
 3. POSTs to `/api/agent/new` with `{ type: "prompt", cwd: <temp>, message, provider, modelId }`
@@ -289,7 +296,47 @@ The e2e test:
 12. DELETEs `/api/sessions/[id]` to clean up
 
 Exit codes:
+
 - `0` — all assertions pass
 - `1` — at least one assertion failed
 - `2` — preflight failed (no model / dev server unreachable)
 - `3` — runtime error (LLM crashed, HTTP error)
+
+## Changelog Convention
+
+Every bug fix, improvement, refactor, security patch, or performance optimization
+**must** have a corresponding changelog document.
+
+### File location
+
+`docs/changelog/YYYYMMDD-short-description.md`
+
+### Template
+
+Copy from `docs/changelog/0000-TEMPLATE.md` and fill in all sections:
+
+| Section     | Required  | Content                                   |
+| ----------- | --------- | ----------------------------------------- |
+| 1. 元信息   | ✅        | Date, Type, Severity, Files Changed       |
+| 2. 问题描述 | ✅        | 现象、根因、影响范围                      |
+| 3. 解决方案 | ✅        | 方案选择、文件清单、核心逻辑 before/after |
+| 4. 验证     | ✅        | 测试结果、验收标准                        |
+| 5. 回滚方案 | ✅        | 回滚命令、影响                            |
+| 6. 后续改进 | ⚠️ 可选 | 待跟进的 TODO                             |
+
+### Rules
+
+1. **One changelog per fix/improvement** — don't batch unrelated changes
+2. **Write immediately after code change** — before running the next task
+3. **Before/after code snippets required** — show the key logic change, not file diffs
+4. **Severity drives urgency**:
+   - `P0 阻断`: system down, must fix immediately
+   - `P1 高`: feature broken, fix within the day
+   - `P2 中`: non-critical bug, fix within the week
+   - `P3 低`: cosmetic/nice-to-have, backlog
+5. **Verify before committing** — smoke test must pass before changelog is finalized
+
+### First entry
+
+See `docs/changelog/20260716-remove-global-planstate-singleton.md` for the
+canonical example.

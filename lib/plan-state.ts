@@ -14,12 +14,13 @@
  * - 追问次数硬限 1（clarificationCount）
  * - 持久化：~/.pi/agent/plan-states/<sessionId>.json
  * - 跨 session 隔离：每个 session 独立的 PlanStateManager
- * - 全局活跃态：setActivePlanState() 供工具 wrapper 读取
+ * - 无全局单例：PlanStateManager 通过闭包注入到每个 session 的工具中
  */
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 // ─── 类型定义 ──────────────────────────────────────────────────────
 
@@ -270,6 +271,29 @@ export function describeWaitingFor(phase: PlanPhase): string {
   return descriptions[phase] ?? phase;
 }
 
+// ─── AsyncLocalStorage 上下文 ─────────────────────────────────────
+// 替代全局单例 _activePlanState。
+// 每个 session 的 prompt 调用链通过计划状态存储获得自己的 PlanStateManager 作用域，
+// 工具 execute 函数通过 getActivePlanState() 读取当前异步链的 PlanStateManager。
+
+const planStateStorage = new AsyncLocalStorage<PlanStateManager>();
+
+/**
+ * 在指定的 PlanStateManager 作用域内执行异步函数。
+ * 供 AgentSessionWrapper.send() 在 prompt 前调用。
+ */
+export function withPlanState<T>(mgr: PlanStateManager, fn: () => Promise<T>): Promise<T> {
+  return planStateStorage.run(mgr, fn);
+}
+
+/**
+ * 获取当前异步链绑定的 PlanStateManager。
+ * 供工具 execute 函数在 wrapper beforeExecute 和体内部读取。
+ */
+export function getActivePlanState(): PlanStateManager | null {
+  return planStateStorage.getStore() ?? null;
+}
+
 export function classifyUserConfirmation(message: string): "confirm" | "reject" | "modify" | "ambiguous" {
   const m = message.trim().toLowerCase();
   if (/^(确认|好的|可以|没问题|对|yes|ok|确认预订|确认方案|就这个|就这个吧|同意|就它了|安排)/i.test(m)) return "confirm";
@@ -278,20 +302,4 @@ export function classifyUserConfirmation(message: string): "confirm" | "reject" 
   return "ambiguous";
 }
 
-let _activePlanState: PlanStateManager | null = null;
 
-export function setActivePlanState(mgr: PlanStateManager | null): void {
-  _activePlanState = mgr;
-}
-
-export function getActivePlanState(): PlanStateManager | null {
-  return _activePlanState;
-}
-
-export function guardToolCallWithActive(toolName: string):
-  | { allowed: true }
-  | { allowed: false; error: string; currentPhase: string } {
-  const mgr = _activePlanState;
-  if (!mgr) return { allowed: true };
-  return mgr.guardToolCall(toolName);
-}

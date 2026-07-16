@@ -4,10 +4,10 @@ import { cacheSessionPath } from "./session-reader";
 import type { AgentSessionLike, ToolInfo } from "./pi-types";
 import { getActivityPlannerTools, TOOL_METADATA } from "@/src/tools/activity-tools";
 import { ACTIVITY_PLANNER_SYSTEM_PROMPT } from "@/src/prompts/activity-planner";
-import { PlanStateManager, classifyUserConfirmation, describeWaitingFor, setActivePlanState, getActivePlanState } from "./plan-state";
+import { withPlanState, PlanStateManager, classifyUserConfirmation, describeWaitingFor } from "./plan-state";
 
 // ============================================================================
-// Resource Loader: injects activity planner system prompt
+// 资源加载器：注入活动规划器系统提示词
 // ============================================================================
 
 function createActivityResourceLoader(cwd: string, agentDir: string): ResourceLoader {
@@ -19,28 +19,28 @@ function createActivityResourceLoader(cwd: string, agentDir: string): ResourceLo
     getThemes: () => baseLoader.getThemes(),
     getAgentsFiles: () => baseLoader.getAgentsFiles(),
     getAppendSystemPrompt: () => baseLoader.getAppendSystemPrompt(),
-    extendResources: (paths) => baseLoader.extendResources(paths),
-    reload: () => baseLoader.reload(),
     getSystemPrompt() {
       return ACTIVITY_PLANNER_SYSTEM_PROMPT;
     },
+    extendResources: (paths) => baseLoader.extendResources(paths),
+    reload: () => baseLoader.reload(),
   };
 }
 
 // ============================================================================
-// Activity tool definitions
+// 活动工具定义（模块级单例，planState 通过 AsyncLocalStorage 注入）
 // ============================================================================
 
 const ACTIVITY_TOOLS = getActivityPlannerTools();
 export const ACTIVITY_TOOL_NAMES = ACTIVITY_TOOLS.map((t) => t.name);
 
-// Tool presets: activity-agent only uses activity tools
+// 工具预设：activity-agent 仅使用活动工具
 export const PRESET_NONE: string[] = [];
 export const PRESET_DEFAULT: string[] = [...ACTIVITY_TOOL_NAMES];
 export const PRESET_FULL: string[] = [...ACTIVITY_TOOL_NAMES];
 
 // ============================================================================
-// Types
+// 类型定义
 // ============================================================================
 
 export interface AgentEvent {
@@ -51,7 +51,7 @@ export interface AgentEvent {
 type EventListener = (event: AgentEvent) => void;
 
 // ============================================================================
-// AgentSessionWrapper
+// AgentSessionWrapper 包装器
 // ============================================================================
 
 export class AgentSessionWrapper {
@@ -147,7 +147,10 @@ export class AgentSessionWrapper {
         const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         const userMessage = command.message as string;
         await this.advancePlanPhase(userMessage);
-        this.inner.prompt(userMessage, promptImages?.length ? { images: promptImages } : undefined).catch(() => {});
+        // 在 AsyncLocalStorage 作用域内运行 prompt，确保工具 execute 读到正确的 planState
+        withPlanState(this.planState, () =>
+          this.inner.prompt(userMessage, promptImages?.length ? { images: promptImages } : undefined).catch(() => {})
+        );
         return null;
       }
 
@@ -305,7 +308,7 @@ export class AgentSessionWrapper {
 }
 
 // ============================================================================
-// Session registry
+// 会话注册表
 // ============================================================================
 
 declare global {
@@ -334,9 +337,9 @@ export function getRpcSession(sessionId: string): AgentSessionWrapper | undefine
 }
 
 /**
- * Get or create an AgentSession for the given session.
- * For new sessions (sessionFile === ""), pi generates its own id.
- * Always activates the full set of activity planner tools.
+ * 获取或创建指定会话对应的 AgentSession。
+ * 对于新会话（sessionFile === ""），pi 会生成自己的 id。
+ * 始终激活完整的活动规划工具集。
  */
 export async function startRpcSession(
   sessionId: string,
@@ -377,14 +380,12 @@ export async function startRpcSession(
     if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile);
 
     const planState = await PlanStateManager.load(realSessionId);
-    setActivePlanState(planState);
 
     const wrapper = new AgentSessionWrapper(inner, planState);
     wrapper.start();
 
     wrapper.onDestroy(() => {
       registry.delete(realSessionId);
-      if (getActivePlanState() === planState) setActivePlanState(null);
     });
     registry.set(realSessionId, wrapper);
 

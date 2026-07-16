@@ -45,7 +45,7 @@ import {
   writeOpWrapOpts,
   persistWrapOpts,
 } from "../../lib/tool-wrapper";
-import { guardToolCallWithActive, MAX_CLARIFICATIONS, getActivePlanState, getMissingCriticalFields } from "../../lib/plan-state";
+import { MAX_CLARIFICATIONS, getActivePlanState, getMissingCriticalFields } from "../../lib/plan-state";
 import { getWeather } from "../../lib/weather-service";
 import { computeRoute, buildRouteChain } from "../../lib/route-service";
 import { isOpenAt, parseHoursString } from "../../lib/opening-hours-service";
@@ -681,7 +681,11 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           }],
           details: { error: true, fallback: true },
         })),
-        beforeExecute: guardToolCallWithActive,
+        beforeExecute: () => {
+          const mgr = getActivePlanState();
+          if (!mgr) return { allowed: true };
+          return mgr.guardToolCall(tool.name);
+        },
       });
     }
 
@@ -699,7 +703,11 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           }],
           details: { fallback: true, originalError: err.message },
         })),
-        beforeExecute: guardToolCallWithActive,
+        beforeExecute: () => {
+          const mgr = getActivePlanState();
+          if (!mgr) return { allowed: true };
+          return mgr.guardToolCall(tool.name);
+        },
       });
     }
 
@@ -707,7 +715,11 @@ export function getActivityPlannerTools(): ToolDefinition[] {
     if (["plan_save", "plan_load", "query_booking", "intent_parse"].includes(tool.name)) {
       return wrapToolWithResilience(tool, {
         ...persistWrapOpts,
-        beforeExecute: guardToolCallWithActive,
+        beforeExecute: () => {
+          const mgr = getActivePlanState();
+          if (!mgr) return { allowed: true };
+          return mgr.guardToolCall(tool.name);
+        },
       });
     }
 
@@ -716,7 +728,11 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       return wrapToolWithResilience(tool, {
         retry: { maxRetries: 0 },
         timeoutMs: 2_000,
-        beforeExecute: guardToolCallWithActive,
+        beforeExecute: () => {
+          const mgr = getActivePlanState();
+          if (!mgr) return { allowed: true };
+          return mgr.guardToolCall(tool.name);
+        },
       });
     }
 

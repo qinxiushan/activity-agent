@@ -15,13 +15,11 @@
 import { searchPOIs, getDatabaseStats, getSupportedCities, getPOIById } from "../lib/poi-database";
 import { BookingService, BookingError } from "../lib/booking-service";
 import {
+  withPlanState,
   PlanStateManager,
   classifyUserConfirmation,
   isToolAllowedInPhase,
   describeWaitingFor,
-  setActivePlanState,
-  getActivePlanState,
-  guardToolCallWithActive,
   getMissingCriticalFields,
   MAX_CLARIFICATIONS,
 } from "../lib/plan-state";
@@ -154,7 +152,6 @@ async function main() {
   // ─── P0-3: 8-阶段状态机 ──────────────────────────────
   section("🎯 P0-3: 8-phase state machine");
   const mgr = new PlanStateManager("smoke-session-v2");
-  setActivePlanState(mgr);
 
   log("Initial phase idle", mgr.currentPhase === "idle");
   log("intent_parse allowed in intent_capture", isToolAllowedInPhase("intent_parse", "intent_capture"));
@@ -187,7 +184,6 @@ async function main() {
 
   // 越界检查
   const mgr2 = new PlanStateManager("smoke-illegal");
-  setActivePlanState(mgr2);
   const tBad = await mgr2.transition("executing", "skipped");
   log("Illegal transition idle → executing BLOCKED", !tBad.ok);
 
@@ -199,7 +195,6 @@ async function main() {
   // 1-次追问硬限
   log("MAX_CLARIFICATIONS = 1", MAX_CLARIFICATIONS === 1);
   const mgr3 = new PlanStateManager("smoke-clarify");
-  setActivePlanState(mgr3);
   await mgr3.transition("intent_capture", "start");
   const inc1 = mgr3.incrementClarification();
   log("1st clarification allowed", inc1 === true);
@@ -224,8 +219,7 @@ async function main() {
   log("Classify '不要'", classifyUserConfirmation("不要") === "reject");
   log("Classify '我想去公园'", classifyUserConfirmation("我想去公园") === "ambiguous");
 
-  log("Active plan state set", getActivePlanState() === mgr3);
-  const guardActive = guardToolCallWithActive("reservation_exec");
+  const guardActive = mgr3.guardToolCall("reservation_exec");
   log("Guard reservation_exec in intent_capture blocked", !guardActive.allowed);
 
   // ─── P0-4: Tool Wrapper ─────────────────────────────────
@@ -267,7 +261,6 @@ async function main() {
   log("Fallback invoked on permanent failure", fallbackCalled);
   log("Fallback result returned", (r2.details as { fallback: boolean })?.fallback === true);
 
-  setActivePlanState(mgr2);
   const guardableTool: ToolDefinition = {
     name: "reservation_exec", label: "reservation_exec", description: "test",
     parameters: { type: "object", properties: {} } as never,
@@ -275,7 +268,7 @@ async function main() {
   };
   const guarded = wrapToolWithResilience(guardableTool, {
     retry: { maxRetries: 0 },
-    beforeExecute: guardToolCallWithActive,
+    beforeExecute: (tn) => mgr2.guardToolCall(tn),
   });
   const r3 = await guarded.execute!("id", {}, undefined, undefined, {} as never);
   log("Phase guard blocks tool call (PHASE_GUARD code)", (r3.details as { error?: boolean; code?: string })?.code === "PHASE_GUARD");
@@ -287,6 +280,8 @@ async function main() {
   section("🔌 Integration: 12 tools registered");
   const { getActivityPlannerTools, TOOL_METADATA } = await import("../src/tools/activity-tools");
   const tools = getActivityPlannerTools();
+  // 带 planState 的工具集：用于验证 phase guard 集成
+  const toolsWithPlan = getActivityPlannerTools(mgr3);
   log("12 tools registered", tools.length === 12, `${tools.length} tools`);
 
   const expectedTools = [
@@ -303,16 +298,14 @@ async function main() {
   log("All tools have name + label", tools.every((t) => t.name && t.label));
   log("All tools have execute fn", tools.every((t) => typeof t.execute === "function"));
 
-  setActivePlanState(mgr3);
   const askTool = tools.find((t) => t.name === "ask_clarification");
   log("ask_clarification found", !!askTool);
   if (askTool) {
     const mgrAsk = new PlanStateManager("smoke-ask-1");
-    setActivePlanState(mgrAsk);
     await mgrAsk.transition("intent_capture", "start");
-    const r4 = await askTool.execute!("id", { missingFields: ["date"], question: "What date?" }, undefined, undefined, {} as never);
+    const r4 = await withPlanState(mgrAsk, () => askTool.execute!("id", { missingFields: ["date"], question: "What date?" }, undefined, undefined, {} as never));
     log("1st ask_clarification succeeded", (r4.details as { asked?: boolean })?.asked === true);
-    const r5 = await askTool.execute!("id", { missingFields: ["time"], question: "What time?" }, undefined, undefined, {} as never);
+    const r5 = await withPlanState(mgrAsk, () => askTool.execute!("id", { missingFields: ["time"], question: "What time?" }, undefined, undefined, {} as never));
     const blockedCode = (r5.details as { code?: string })?.code;
     log("2nd ask_clarification BLOCKED (PHASE_GUARD or MAX)", blockedCode === "PHASE_GUARD" || blockedCode === "MAX_CLARIFICATIONS_EXCEEDED", blockedCode ?? "");
   }
@@ -321,10 +314,9 @@ async function main() {
   const ipTool = tools.find((t) => t.name === "intent_parse");
   if (ipTool) {
     const mgr4 = new PlanStateManager("smoke-submit");
-    setActivePlanState(mgr4);
     await mgr4.transition("intent_capture", "start");
     await mgr4.transition("planning", "all fields ok");
-    const r6 = await ipTool.execute!("id", {
+    const r6 = await withPlanState(mgr4, () => ipTool.execute!("id", {
       submitPlan: true,
       plan: {
         summary: "颐和园 + 鼎泰丰",
@@ -335,16 +327,15 @@ async function main() {
         totalCost: 180, totalDurationMinutes: 270,
         weather: { city: "北京", date: "2026-07-15", condition: "sunny", tempMax: 32, tempMin: 22, advice: "适合户外" },
       },
-    }, undefined, undefined, {} as never);
+    }, undefined, undefined, {} as never));
     log("intent_parse with submitPlan succeeded", (r6.details as { planSubmitted?: boolean })?.planSubmitted === true);
     log("Phase transitioned to plan_confirm", mgr4.currentPhase === "plan_confirm");
 
     const mgr5 = new PlanStateManager("smoke-resubmit");
-    setActivePlanState(mgr5);
     await mgr5.transition("intent_capture", "start");
     await mgr5.transition("planning", "fields ok");
     await mgr5.transition("plan_confirm", "first submit");
-    const r7 = await ipTool.execute!("id", {
+    const r7 = await withPlanState(mgr5, () => ipTool.execute!("id", {
       submitPlan: true,
       plan: {
         summary: "二次提交（应被拒）",
@@ -352,17 +343,16 @@ async function main() {
         totalCost: 100, totalDurationMinutes: 120,
         weather: { city: "北京", date: "2026-07-15", condition: "sunny", tempMax: 30, tempMin: 20, advice: "" },
       },
-    }, undefined, undefined, {} as never);
+    }, undefined, undefined, {} as never));
     const resubmitCode = (r7.details as { code?: string })?.code;
     log("intent_parse submitPlan=true BLOCKED in plan_confirm (P1: 防 LLM 二次提交覆盖执行状态)", resubmitCode === "SUBMIT_PLAN_OUT_OF_PHASE" || resubmitCode === "PHASE_GUARD", resubmitCode ?? "");
 
     const mgr6 = new PlanStateManager("smoke-resubmit-executing");
-    setActivePlanState(mgr6);
     await mgr6.transition("intent_capture", "start");
     await mgr6.transition("planning", "fields ok");
     await mgr6.transition("plan_confirm", "first submit");
     await mgr6.transition("executing", "user confirmed");
-    const r8 = await ipTool.execute!("id", {
+    const r8 = await withPlanState(mgr6, () => ipTool.execute!("id", {
       submitPlan: true,
       plan: {
         summary: "executing 阶段再次提交（应被拒）",
@@ -370,15 +360,12 @@ async function main() {
         totalCost: 100, totalDurationMinutes: 120,
         weather: { city: "北京", date: "2026-07-15", condition: "sunny", tempMax: 30, tempMin: 20, advice: "" },
       },
-    }, undefined, undefined, {} as never);
+    }, undefined, undefined, {} as never));
     const resubmitExecCode = (r8.details as { code?: string })?.code;
     log("intent_parse submitPlan=true BLOCKED in executing (P1: 防 LLM 二次提交覆盖执行状态)", resubmitExecCode === "SUBMIT_PLAN_OUT_OF_PHASE" || resubmitExecCode === "PHASE_GUARD", resubmitExecCode ?? "");
-
-    setActivePlanState(mgr4);
   }
 
   // 每个工具 execute 一次（验证无 crash）
-  setActivePlanState(null);
   for (const t of tools) {
     try {
       const r = await t.execute!("smoke", {}, undefined, undefined, {} as never);
