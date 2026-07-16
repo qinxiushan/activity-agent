@@ -53,3 +53,9 @@ next-env.d.ts
 /tests/__screenshots__/
 /blob-report/
 .playwright/
+
+# opencode
+.omo/
+
+# docs
+/docs/
