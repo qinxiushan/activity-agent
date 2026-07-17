@@ -13,6 +13,7 @@ import { ACTIVITY_PLANNER_SYSTEM_PROMPT } from "@/src/prompts/activity-planner";
 import { withPlanState, PlanStateManager, classifyUserConfirmation, describeWaitingFor } from "./plan-state";
 import { EventAdapter } from "./event-adapter";
 import type { StandardEvent } from "./event-types";
+import { metrics } from "./metrics-registry";
 import phaseGuardExtension from "./extensions/phase-guard";
 
 // ============================================================================
@@ -98,10 +99,49 @@ export class AgentSessionWrapper {
       this.resetIdleTimer();
       const standardEvents = this.eventAdapter.adapt(event as unknown as Parameters<EventAdapter["adapt"]>[0]);
       for (const standardEvent of standardEvents) {
+        // 分发给业务 listener
         for (const l of this.listeners) l(standardEvent);
+        // 采集 metrics
+        this.collectMetrics(standardEvent);
       }
     });
     this.resetIdleTimer();
+    // session 创建时记录活跃数 + 基础计数（便于验证 pipeline 工作）
+    metrics.set("active_sessions", this.getActiveSessionCountFromRegistry());
+    this.onDestroy(() => {
+      metrics.set("active_sessions", this.getActiveSessionCountFromRegistry());
+    });
+  }
+
+  private collectMetrics(event: StandardEvent): void {
+    try {
+      switch (event.type) {
+        case "turn_end": {
+          const tokens = event.usage.input + event.usage.output;
+          if (tokens > 0) {
+            metrics.inc("llm_tokens_total", { model: this.inner.model?.id ?? "unknown" }, tokens);
+          }
+          metrics.set("active_sessions", this.getActiveSessionCountFromRegistry());
+          break;
+        }
+        case "tool_end":
+          metrics.inc("tool_call_total", { tool: event.toolName, status: event.isError ? "error" : "ok" });
+          break;
+      }
+    } catch (e) {
+      console.error("[metrics] collect failed:", e);
+    }
+  }
+
+  /** 从 globalThis 获取活跃 session 数（与 AgentSessionWrapper 共享注册表） */
+  private getActiveSessionCountFromRegistry(): number {
+    const registry = (globalThis as { __piSessions?: Map<string, AgentSessionWrapper> }).__piSessions;
+    if (!registry) return 0;
+    let count = 0;
+    for (const s of registry.values()) {
+      if (s.isAlive()) count++;
+    }
+    return count;
   }
 
   private resetIdleTimer(): void {

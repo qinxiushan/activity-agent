@@ -1,4 +1,9 @@
-# [bug] 修复 ResourceLoader.getSystemPrompt() 覆写导致 AGENTS.md 被丢弃
+# [反面参考] ResourceLoader.getSystemPrompt() 覆写 —— 无意义修改
+
+> **结论：此修改已回退，不合并到主分支。**
+> activity-agent 是纯 web 应用，cwd 为临时目录，不存在 AGENTS.md/CLAUDE.md。
+> 原始 `getSystemPrompt()` 替换是故意设计，无需修改。
+> 保留此文档作为反面参考，避免将来对 web 应用套用 production AGENTS.md 方法论。
 
 ---
 

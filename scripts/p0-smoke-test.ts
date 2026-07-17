@@ -639,6 +639,43 @@ async function main() {
   );
   log("Extension passes when no plan state loaded", noPlanStateResult === undefined);
 
+  section("🔌 P0 Stage-1: Prometheus Metrics (T4)");
+  const { metrics: promMetrics } = await import("../lib/metrics-registry");
+
+  // registry 应注册 4 个 metric
+  log("metrics registry exists", typeof promMetrics.render === "function");
+  const rendered = promMetrics.render();
+  log("/metrics output has HELP lines", rendered.includes("# HELP"));
+  log("/metrics output has TYPE lines", rendered.includes("# TYPE"));
+  log("HELP llm_tokens_total present", rendered.includes("HELP llm_tokens_total"));
+  log("HELP active_sessions present", rendered.includes("HELP active_sessions"));
+  log("HELP tool_call_total present", rendered.includes("HELP tool_call_total"));
+  log("HELP turn_duration_seconds present", rendered.includes("HELP turn_duration_seconds"));
+  log("TYPE llm_tokens_total counter", rendered.includes("TYPE llm_tokens_total counter"));
+  log("TYPE active_sessions gauge", rendered.includes("TYPE active_sessions gauge"));
+  log("TYPE tool_call_total counter", rendered.includes("TYPE tool_call_total counter"));
+  log("TYPE turn_duration_seconds histogram", rendered.includes("TYPE turn_duration_seconds histogram"));
+
+  // 初始值为 0
+  log("initial llm_tokens_total=0", promMetrics.getCounterValue("llm_tokens_total", { model: "test" }) === 0);
+  log("initial tool_call_total=0", promMetrics.getCounterValue("tool_call_total", { tool: "test", status: "ok" }) === 0);
+
+  // inc 和 observe 后值正确
+  promMetrics.inc("llm_tokens_total", { model: "test" }, 100);
+  log("llm_tokens_total after inc(100)=100", promMetrics.getCounterValue("llm_tokens_total", { model: "test" }) === 100);
+
+  promMetrics.inc("tool_call_total", { tool: "get_weather", status: "ok" });
+  log("tool_call_total after inc=1", promMetrics.getCounterValue("tool_call_total", { tool: "get_weather", status: "ok" }) === 1);
+
+  promMetrics.observe("turn_duration_seconds", 2.5);
+  const rendered2 = promMetrics.render();
+  log("histogram has _sum", rendered2.includes("turn_duration_seconds_sum"));
+  log("histogram has _count", rendered2.includes("turn_duration_seconds_count"));
+
+  // 格式验证：promtool validate
+  const lines = rendered2.trim().split("\n");
+  const metricLines = lines.filter((l: string) => !l.startsWith("#"));
+  log("metric lines have valid Prometheus format", metricLines.every((l: string) => /^[a-z_]/.test(l)));
 
   await afs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
 
