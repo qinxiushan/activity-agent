@@ -280,8 +280,6 @@ async function main() {
   section("🔌 Integration: 12 tools registered");
   const { getActivityPlannerTools, TOOL_METADATA } = await import("../src/tools/activity-tools");
   const tools = getActivityPlannerTools();
-  // 带 planState 的工具集：用于验证 phase guard 集成
-  const toolsWithPlan = getActivityPlannerTools(mgr3);
   log("12 tools registered", tools.length === 12, `${tools.length} tools`);
 
   const expectedTools = [
@@ -500,6 +498,29 @@ async function main() {
   log("Persistence: reloaded stats match", reloadedPrefs.stats.totalSessions === 5);
 
   log("DEFAULT_USER_ID = 'default'", DEFAULT_USER_ID === "default");
+
+  section("🏥 P0 Stage-1: Health Endpoints (T1)");
+  const { runLivenessCheck, runReadinessChecks } = await import("../lib/health");
+
+  const live = runLivenessCheck();
+  log("runLivenessCheck: status=ok", live.status === "ok");
+  log("runLivenessCheck: uptime is number >= 0", typeof live.uptime === "number" && live.uptime >= 0);
+  log("runLivenessCheck: version is string", typeof live.version === "string" && live.version.length > 0);
+  log("runLivenessCheck: timestamp is ISO", /^\d{4}-\d{2}-\d{2}T/.test(live.timestamp));
+
+  const ready = await runReadinessChecks();
+  log("runReadinessChecks: returns ok=true (clean env)", ready.ok === true);
+  log("runReadinessChecks: latencyMs is number", typeof ready.latencyMs === "number" && ready.latencyMs >= 0);
+  log("runReadinessChecks: latencyMs < 1000ms", ready.latencyMs < 1000);
+  log("runReadinessChecks: checks.sessions_dir_writable = true", ready.checks.sessions_dir_writable === true);
+  log("runReadinessChecks: checks.plan_states_dir_writable = true", ready.checks.plan_states_dir_writable === true);
+  log("runReadinessChecks: checks.bookings_dir_writable = true", ready.checks.bookings_dir_writable === true);
+  log("runReadinessChecks: checks.user_profiles_dir_writable = true", ready.checks.user_profiles_dir_writable === true);
+  log("runReadinessChecks: checks.memory_under_threshold = true", ready.checks.memory_under_threshold === true);
+  log("runReadinessChecks: details.memoryUsedMb is number", typeof ready.details?.memoryUsedMb === "number");
+  log("runReadinessChecks: details.activeSessions is number", typeof ready.details?.activeSessions === "number");
+  log("runReadinessChecks: returns structured HealthCheckResult", typeof ready === "object" && "ok" in ready && "checks" in ready);
+
 
   await afs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
 
