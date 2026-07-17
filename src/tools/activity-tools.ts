@@ -681,11 +681,8 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           }],
           details: { error: true, fallback: true },
         })),
-        beforeExecute: () => {
-          const mgr = getActivePlanState();
-          if (!mgr) return { allowed: true };
-          return mgr.guardToolCall(tool.name);
-        },
+
+        // Phase guard 已迁移到 Extension lib/extensions/phase-guard.ts (T3)
       });
     }
 
@@ -703,11 +700,8 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           }],
           details: { fallback: true, originalError: err.message },
         })),
-        beforeExecute: () => {
-          const mgr = getActivePlanState();
-          if (!mgr) return { allowed: true };
-          return mgr.guardToolCall(tool.name);
-        },
+
+        // Phase guard 已迁移到 Extension lib/extensions/phase-guard.ts (T3)
       });
     }
 
@@ -715,11 +709,8 @@ export function getActivityPlannerTools(): ToolDefinition[] {
     if (["plan_save", "plan_load", "query_booking", "intent_parse"].includes(tool.name)) {
       return wrapToolWithResilience(tool, {
         ...persistWrapOpts,
-        beforeExecute: () => {
-          const mgr = getActivePlanState();
-          if (!mgr) return { allowed: true };
-          return mgr.guardToolCall(tool.name);
-        },
+
+        // Phase guard 已迁移到 Extension lib/extensions/phase-guard.ts (T3)
       });
     }
 
@@ -728,11 +719,8 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       return wrapToolWithResilience(tool, {
         retry: { maxRetries: 0 },
         timeoutMs: 2_000,
-        beforeExecute: () => {
-          const mgr = getActivePlanState();
-          if (!mgr) return { allowed: true };
-          return mgr.guardToolCall(tool.name);
-        },
+
+        // Phase guard 已迁移到 Extension lib/extensions/phase-guard.ts (T3)
       });
     }
 

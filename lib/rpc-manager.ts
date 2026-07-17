@@ -13,13 +13,18 @@ import { ACTIVITY_PLANNER_SYSTEM_PROMPT } from "@/src/prompts/activity-planner";
 import { withPlanState, PlanStateManager, classifyUserConfirmation, describeWaitingFor } from "./plan-state";
 import { EventAdapter } from "./event-adapter";
 import type { StandardEvent } from "./event-types";
+import phaseGuardExtension from "./extensions/phase-guard";
 
 // ============================================================================
 // 资源加载器：注入活动规划器系统提示词
 // ============================================================================
 
 function createActivityResourceLoader(cwd: string, agentDir: string): ResourceLoader {
-  const baseLoader = new DefaultResourceLoader({ cwd, agentDir });
+  const baseLoader = new DefaultResourceLoader({
+    cwd,
+    agentDir,
+    extensionFactories: [phaseGuardExtension],
+  });
   return {
     getExtensions: () => baseLoader.getExtensions(),
     getSkills: () => baseLoader.getSkills(),

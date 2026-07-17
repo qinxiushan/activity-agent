@@ -582,7 +582,51 @@ async function main() {
   const a14 = adapter.adapt({ type: undefined as unknown as string });
   log("event without type → empty array (defensive)", a14.length === 0);
 
+  section("🔌 P0 Stage-1: Extensions Phase Guard (T3)");
+  const { default: phaseGuardExtension } = await import("../lib/extensions/phase-guard");
 
+  let registeredHandler: ((event: unknown, ctx: unknown) => Promise<unknown>) | null = null;
+  const mockPi = {
+    on: (event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => {
+      if (event === "tool_call") registeredHandler = handler;
+    },
+  };
+  phaseGuardExtension(mockPi as never);
+  log("Extension factory registered tool_call handler", typeof registeredHandler === "function");
+
+  const t3mgr = new PlanStateManager(`t3-test-${Date.now()}`);
+  await t3mgr.transition("intent_capture");
+
+  const blockResult = await withPlanState(t3mgr, async () => {
+    return registeredHandler!(
+      { type: "tool_call", toolName: "reservation_exec", toolCallId: "tc_test", input: {} },
+      {} as never,
+    );
+  });
+  log("Extension blocks illegal tool call (reservation_exec in intent_capture)", (blockResult as { block?: boolean })?.block === true);
+  log("Extension block reason is string", typeof (blockResult as { reason?: string })?.reason === "string");
+
+  const allowResult = await withPlanState(t3mgr, async () => {
+    return registeredHandler!(
+      { type: "tool_call", toolName: "intent_parse", toolCallId: "tc_test", input: {} },
+      {} as never,
+    );
+  });
+  log("Extension allows legal tool call (intent_parse in intent_capture)", allowResult === undefined || (allowResult as { block?: boolean })?.block !== true);
+
+  const nonBusinessResult = await withPlanState(t3mgr, async () => {
+    return registeredHandler!(
+      { type: "tool_call", toolName: "bash", toolCallId: "tc_test", input: {} },
+      {} as never,
+    );
+  });
+  log("Extension passes non-business tools (bash) without blocking", nonBusinessResult === undefined);
+
+  const noPlanStateResult = await registeredHandler!(
+    { type: "tool_call", toolName: "reservation_exec", toolCallId: "tc_test", input: {} },
+    {} as never,
+  );
+  log("Extension passes when no plan state loaded", noPlanStateResult === undefined);
 
 
   await afs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
