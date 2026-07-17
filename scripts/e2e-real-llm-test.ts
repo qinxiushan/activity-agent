@@ -410,7 +410,7 @@ async function main(): Promise<void> {
   sseStop = await collectEvents(sessionId, (ev) => {
     const type = ev.type as string;
     switch (type) {
-      case "tool_execution_start": {
+      case "tool_start": {
         const name = (ev.toolName as string) ?? "?";
         const callId = (ev.toolCallId as string) ?? "?";
         const args = ev.args;
@@ -418,21 +418,20 @@ async function main(): Promise<void> {
         turns[currentTurn - 1]!.push({ name, callId, argsSummary: summarizeArgs(args), ok: true, resultSummary: "" });
         break;
       }
-      case "tool_execution_end": {
+      case "tool_end": {
         const callId = (ev.toolCallId as string) ?? "?";
-        const result = ev.result;
         const isError = ev.isError === true;
         for (const arr of turns) {
           const idx = arr.findIndex((t) => t.callId === callId && !t.resultSummary);
           if (idx !== -1) {
             arr[idx]!.ok = !isError;
-            arr[idx]!.resultSummary = summarizeResult(result);
+            arr[idx]!.resultSummary = `completed (${ev.durationMs}ms)`;
             break;
           }
         }
         break;
       }
-      case "message_end": {
+      case "message_added": {
         const msg = ev.message as { role?: string; content?: Array<{ type: string; text?: string }> } | undefined;
         if (msg?.role === "assistant" && Array.isArray(msg.content)) {
           const text = msg.content.filter((b) => b.type === "text" && typeof b.text === "string").map((b) => b.text ?? "").join("");
