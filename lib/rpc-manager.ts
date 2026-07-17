@@ -11,6 +11,8 @@ import type { AgentSessionLike, ToolInfo } from "./pi-types";
 import { getActivityPlannerTools, TOOL_METADATA } from "@/src/tools/activity-tools";
 import { ACTIVITY_PLANNER_SYSTEM_PROMPT } from "@/src/prompts/activity-planner";
 import { withPlanState, PlanStateManager, classifyUserConfirmation, describeWaitingFor } from "./plan-state";
+import { EventAdapter } from "./event-adapter";
+import type { StandardEvent } from "./event-types";
 
 // ============================================================================
 // 资源加载器：注入活动规划器系统提示词
@@ -54,7 +56,7 @@ export interface AgentEvent {
   [key: string]: unknown;
 }
 
-type EventListener = (event: AgentEvent) => void;
+type EventListener = (event: StandardEvent) => void;
 
 // ============================================================================
 // AgentSessionWrapper 包装器
@@ -67,9 +69,11 @@ export class AgentSessionWrapper {
   private onDestroyCallback: (() => void) | null = null;
   private _alive = true;
   public readonly planState: PlanStateManager;
+  private eventAdapter: EventAdapter;
 
   constructor(public readonly inner: AgentSessionLike, planState?: PlanStateManager) {
     this.planState = planState ?? new PlanStateManager(inner.sessionId);
+    this.eventAdapter = new EventAdapter(inner.sessionId, this.planState);
   }
 
   get sessionId(): string {
@@ -87,7 +91,10 @@ export class AgentSessionWrapper {
   start(): void {
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
       this.resetIdleTimer();
-      for (const l of this.listeners) l(event);
+      const standardEvents = this.eventAdapter.adapt(event as unknown as Parameters<EventAdapter["adapt"]>[0]);
+      for (const standardEvent of standardEvents) {
+        for (const l of this.listeners) l(standardEvent);
+      }
     });
     this.resetIdleTimer();
   }

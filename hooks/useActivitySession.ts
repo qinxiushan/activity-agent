@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { StandardEvent } from "@/lib/event-types";
 
 export interface ActivityToolCall {
   id: string;
@@ -177,17 +178,20 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
       };
       es.onmessage = (e) => {
         reconnectAttemptsRef.current = 0;
-        let ev: RawEvent;
-        try { ev = JSON.parse(e.data) as RawEvent; } catch { return; }
+        let ev: StandardEvent;
+        try {
+          const parsed = JSON.parse(e.data) as RawEvent;
+          ev = parsed as unknown as StandardEvent;
+        } catch { return; }
         switch (ev.type) {
           case "agent_start":
             setState((prev) => ({ ...prev, agentRunning: true }));
             break;
-          case "agent_end":
+          case "done":
             setState((prev) => ({ ...prev, agentRunning: false }));
             break;
-          case "message_end": {
-            const m = ev.message as { role?: string; content?: Array<{ type: string; text?: string }> } | undefined;
+          case "message_added": {
+            const m = ev.message as { role?: string; content?: Array<{ type: string; text?: string }> | string } | undefined;
             if (!m) return;
             let text = "";
             if (typeof m.content === "string") text = m.content;
@@ -195,18 +199,19 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
               text = m.content.filter((b) => b.type === "text" && typeof b.text === "string").map((b) => b.text ?? "").join("");
             }
             if (!text && m.role !== "user") return;
+            const ts = Date.now();
             setState((prev) => {
               const last = prev.messages[prev.messages.length - 1];
-              if (last && last.role === m.role && Math.abs(last.timestamp - (ev.timestamp as number ?? Date.now())) < 200) {
+              if (last && last.role === m.role && Math.abs(last.timestamp - ts) < 200) {
                 return { ...prev, messages: [...prev.messages.slice(0, -1), { ...last, content: last.content + text }] };
               }
-              return { ...prev, messages: [...prev.messages, { role: (m.role as "user" | "assistant") ?? "assistant", content: text, timestamp: Date.now() }] };
+              return { ...prev, messages: [...prev.messages, { role: (m.role as "user" | "assistant") ?? "assistant", content: text, timestamp: ts }] };
             });
             break;
           }
-          case "tool_execution_start": {
-            const id = (ev.toolCallId as string) ?? Math.random().toString(36).slice(2);
-            const name = (ev.toolName as string) ?? "?";
+          case "tool_start": {
+            const id = ev.toolCallId ?? Math.random().toString(36).slice(2);
+            const name = ev.toolName ?? "?";
             const args = ev.args;
             const tc: ActivityToolCall = {
               id, name,
@@ -220,14 +225,12 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
             setState((prev) => ({ ...prev, toolCalls: [...prev.toolCalls, tc] }));
             break;
           }
-          case "tool_execution_end": {
-            const id = (ev.toolCallId as string) ?? "";
-            const result = ev.result;
-            const isError = ev.isError === true;
+          case "tool_end": {
+            const id = ev.toolCallId ?? "";
             setState((prev) => ({
               ...prev,
               toolCalls: prev.toolCalls.map((t) => t.id === id
-                ? { ...t, ok: !isError, result, resultSummary: summarizeResult(result), endedAt: Date.now() }
+                ? { ...t, ok: !ev.isError, endedAt: Date.now() }
                 : t),
             }));
             break;

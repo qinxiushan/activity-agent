@@ -521,6 +521,69 @@ async function main() {
   log("runReadinessChecks: details.activeSessions is number", typeof ready.details?.activeSessions === "number");
   log("runReadinessChecks: returns structured HealthCheckResult", typeof ready === "object" && "ok" in ready && "checks" in ready);
 
+  section("🔌 P0 Stage-1: EventAdapter (T2)");
+  const { EventAdapter } = await import("../lib/event-adapter");
+  const adapter = new EventAdapter("test-session-id");
+
+  const a1 = adapter.adapt({ type: "agent_start" });
+  log("agent_start → 1 standard event", a1.length === 1 && a1[0].type === "agent_start");
+  log("agent_start → sessionId passed through", a1[0].type === "agent_start" && (a1[0] as { sessionId: string }).sessionId === "test-session-id");
+
+  const a2 = adapter.adapt({ type: "turn_start" });
+  log("turn_start → turnIndex=1", a2[0].type === "turn_start" && (a2[0] as { turnIndex: number }).turnIndex === 1);
+  const a2b = adapter.adapt({ type: "turn_start" });
+  log("turn_start → turnIndex incremented to 2", (a2b[0] as { turnIndex: number }).turnIndex === 2);
+
+  const a3 = adapter.adapt({
+    type: "message_update",
+    assistantMessageEvent: { type: "text_delta", delta: "hello" },
+  });
+  log("message_update.text_delta → text_delta event", a3[0]?.type === "text_delta" && (a3[0] as { text: string }).text === "hello");
+
+  const a4 = adapter.adapt({
+    type: "message_update",
+    assistantMessageEvent: { type: "thinking_delta", delta: "let me think" },
+  });
+  log("message_update.thinking_delta → thinking_delta event", a4[0]?.type === "thinking_delta" && (a4[0] as { text: string }).text === "let me think");
+
+  const a5 = adapter.adapt({ type: "tool_execution_start", toolCallId: "tc_1", toolName: "get_weather", args: { city: "北京" } });
+  log("tool_execution_start → tool_start event", a5[0]?.type === "tool_start" && (a5[0] as { toolName: string }).toolName === "get_weather");
+
+  await new Promise((r) => setTimeout(r, 10));
+  const a6 = adapter.adapt({ type: "tool_execution_end", toolCallId: "tc_1", toolName: "get_weather", result: "sunny", isError: false });
+  log("tool_execution_end → tool_end event", a6[0]?.type === "tool_end" && (a6[0] as { isError: boolean }).isError === false);
+  log("tool_end → durationMs >= 10ms", (a6[0] as { durationMs: number }).durationMs >= 10);
+
+  const a7 = adapter.adapt({ type: "agent_end", messages: [] });
+  log("agent_end → done event", a7[0]?.type === "done");
+  log("done → totalTurns = turnIndex", (a7[0] as { totalTurns: number }).totalTurns === 2);
+
+  const a8 = adapter.adapt({ type: "agent_end", messages: [] });
+  log("agent_end fires done only once (idempotent)", a8.length === 0);
+
+  const a9 = adapter.adapt({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, errorMessage: "rate_limited" });
+  log("auto_retry_start → system event with subtype=retry", a9[0]?.type === "system" && (a9[0] as { subtype: string }).subtype === "retry");
+
+  const a10 = adapter.adapt({ type: "auto_compaction_start" });
+  log("auto_compaction_start → system event with subtype=compaction", a10[0]?.type === "system" && (a10[0] as { subtype: string }).subtype === "compaction");
+
+  const a11 = adapter.adapt({ type: "turn_end", message: { usage: { input: 100, output: 50, cacheRead: 10, cacheWrite: 5, cost: { total: 0.001 } }, stopReason: "stop" } });
+  log("turn_end → turn_end event with usage", a11[0]?.type === "turn_end");
+  log("turn_end → cost captured (totalCost = 0.001)", (a11[0] as { usage: { cost: number } }).usage.cost === 0.001);
+
+  const a12 = adapter.adapt({ type: "message_end", message: { stopReason: "error", errorMessage: "API down", role: "assistant" } });
+  log("message_end error → message_added + error events", a12.length === 2);
+  log("message_end error → has message_added", a12.some((e) => e.type === "message_added"));
+  log("message_end error → has error event with code LLM_ERROR", a12.some((e) => e.type === "error" && (e as { code: string }).code === "LLM_ERROR"));
+
+  const a13 = adapter.adapt({ type: "unknown_event" });
+  log("unknown event → empty array (silently ignored)", a13.length === 0);
+
+  const a14 = adapter.adapt({ type: undefined as unknown as string });
+  log("event without type → empty array (defensive)", a14.length === 0);
+
+
+
 
   await afs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
 

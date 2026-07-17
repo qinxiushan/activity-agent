@@ -5,6 +5,7 @@ import type { AgentMessage, SessionInfo, SessionTreeNode } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
 import type { ToolEntry } from "@/components/ToolPanel";
+import type { StandardEvent } from "@/lib/event-types";
 
 export interface SessionData {
   sessionId: string;
@@ -44,10 +45,7 @@ function streamReducer(state: StreamingState, action: StreamAction): StreamingSt
   }
 }
 
-interface AgentEvent {
-  type: string;
-  [key: string]: unknown;
-}
+type AgentEventListener = (event: StandardEvent) => void;
 
 export type AgentPhase =
   | { kind: "waiting_model" }
@@ -118,7 +116,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const agentRunningRef = useRef(false);
-  const handleAgentEventRef = useRef<((event: AgentEvent) => void) | null>(null);
+  const handleAgentEventRef = useRef<AgentEventListener | null>(null);
   const initialScrollDoneRef = useRef(false);
   const lastUserMsgRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollToUserRef = useRef(false);
@@ -221,7 +219,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     eventSourceRef.current = es;
     es.onmessage = (e) => {
       try {
-        const event = JSON.parse(e.data) as AgentEvent;
+        const event = JSON.parse(e.data) as StandardEvent;
         handleAgentEventRef.current?.(event);
       } catch {
         // ignore
@@ -242,14 +240,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     agentRunningRef.current = agentRunning;
   }, [agentRunning]);
 
-  const handleAgentEvent = useCallback((event: AgentEvent) => {
+  const handleAgentEvent = useCallback((event: StandardEvent) => {
     switch (event.type) {
       case "agent_start":
         setAgentRunning(true);
         setAgentPhase({ kind: "waiting_model" });
         dispatch({ type: "start" });
         break;
-      case "agent_end":
+      case "done":
         setAgentRunning(false);
         setAgentPhase(null);
         setRetryInfo(null);
@@ -266,16 +264,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         onAgentEnd?.();
         break;
-      case "message_start":
-      case "message_update": {
-        const msg = event.message as Partial<AgentMessage> | undefined;
-        if (msg) {
-          dispatch({ type: "update", message: normalizeToolCalls(msg as AgentMessage) });
+      case "text_delta":
+      case "thinking_delta":
+        if (event.type === "text_delta") {
+          const partialMsg: Partial<AgentMessage> = {
+            role: "assistant",
+            content: [{ type: "text", text: event.text }],
+          };
+          dispatch({ type: "update", message: normalizeToolCalls(partialMsg as AgentMessage) });
         }
         setAgentPhase(null);
         break;
-      }
-      case "message_end": {
+      case "message_added": {
         const completed = event.message as AgentMessage | undefined;
         if (completed) {
           setMessages((prev) => [...prev, normalizeToolCalls(completed)]);
@@ -284,9 +284,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setAgentPhase({ kind: "waiting_model" });
         break;
       }
-      case "tool_execution_start": {
-        const id = event.toolCallId as string;
-        const name = event.toolName as string;
+      case "tool_start": {
+        const id = event.toolCallId;
+        const name = event.toolName;
         setAgentPhase((prev) => {
           const tools = prev?.kind === "running_tools" ? [...prev.tools] : [];
           if (!tools.some((t) => t.id === id)) tools.push({ id, name });
@@ -294,8 +294,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         });
         break;
       }
-      case "tool_execution_end": {
-        const id = event.toolCallId as string;
+      case "tool_end": {
+        const id = event.toolCallId;
         setAgentPhase((prev) => {
           if (prev?.kind !== "running_tools") return prev;
           const tools = prev.tools.filter((t) => t.id !== id);
@@ -304,25 +304,29 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         });
         break;
       }
-      case "auto_retry_start":
-        setRetryInfo({ attempt: event.attempt as number, maxAttempts: event.maxAttempts as number, errorMessage: event.errorMessage as string | undefined });
-        break;
-      case "auto_retry_end":
-        setRetryInfo(null);
-        break;
-      case "auto_compaction_start":
-      case "compaction_start":
-        setIsCompacting(true);
-        setCompactError(null);
-        break;
-      case "auto_compaction_end":
-      case "compaction_end":
-        setIsCompacting(false);
-        if (event.errorMessage) {
-          setCompactError(event.errorMessage as string);
-        } else if (!event.aborted) {
-          if (sessionIdRef.current) loadSession(sessionIdRef.current);
+      case "system":
+        if (event.subtype === "retry") {
+          const attempt = (event.attempt as number) ?? 1;
+          const maxAttempts = (event.maxAttempts as number) ?? 3;
+          if (event.success === true) {
+            setRetryInfo(null);
+          } else if (event.success === undefined) {
+            setRetryInfo({ attempt, maxAttempts, errorMessage: event.errorMessage as string | undefined });
+          } else {
+            setRetryInfo(null);
+          }
+        } else if (event.subtype === "compaction") {
+          setIsCompacting(true);
+          setCompactError(null);
         }
+        break;
+      case "turn_end":
+        setIsCompacting(false);
+        if (sessionIdRef.current) loadSession(sessionIdRef.current);
+        break;
+      case "error":
+        setAgentRunning(false);
+        setAgentPhase(null);
         break;
     }
   }, [loadSession, onAgentEnd]);

@@ -118,7 +118,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   const origHandler = handleAgentEventRef.current;
   useEffect(() => {
     handleAgentEventRef.current = (event) => {
-      if (event.type === "agent_end" && soundEnabledRef.current) {
+      if (event.type === "done" && soundEnabledRef.current) {
         playDoneSoundRef.current();
       }
       origHandler?.(event);
