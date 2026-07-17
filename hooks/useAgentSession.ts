@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useReducer } from "react";
-import type { AgentMessage, SessionInfo, SessionTreeNode } from "@/lib/types";
+import type { AgentMessage, SessionInfo, SessionTreeNode, AssistantContentBlock, TextContent, ThinkingContent } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
 import type { ToolEntry } from "@/components/ToolPanel";
@@ -117,6 +117,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const agentRunningRef = useRef(false);
   const handleAgentEventRef = useRef<AgentEventListener | null>(null);
+  // 累加 text/thinking delta，keyed by turnIndex
+  const accumulatedText = useRef<Map<number, string>>(new Map());
+  const accumulatedThinking = useRef<Map<number, string>>(new Map());
   const initialScrollDoneRef = useRef(false);
   const lastUserMsgRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollToUserRef = useRef(false);
@@ -243,11 +246,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleAgentEvent = useCallback((event: StandardEvent) => {
     switch (event.type) {
       case "agent_start":
+        accumulatedText.current.clear();
+        accumulatedThinking.current.clear();
         setAgentRunning(true);
         setAgentPhase({ kind: "waiting_model" });
         dispatch({ type: "start" });
         break;
       case "done":
+        accumulatedText.current.clear();
+        accumulatedThinking.current.clear();
         setAgentRunning(false);
         setAgentPhase(null);
         setRetryInfo(null);
@@ -264,17 +271,34 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         onAgentEnd?.();
         break;
-      case "text_delta":
-      case "thinking_delta":
-        if (event.type === "text_delta") {
-          const partialMsg: Partial<AgentMessage> = {
-            role: "assistant",
-            content: [{ type: "text", text: event.text }],
-          };
-          dispatch({ type: "update", message: normalizeToolCalls(partialMsg as AgentMessage) });
-        }
+      case "text_delta": {
+        const turnKey = event.turnIndex;
+        const prevText = accumulatedText.current.get(turnKey) ?? "";
+        accumulatedText.current.set(turnKey, prevText + event.text);
+        const fullText = accumulatedText.current.get(turnKey)!;
+        const fullThinking = accumulatedThinking.current.get(turnKey) ?? "";
+        const content: AssistantContentBlock[] = [];
+        if (fullThinking) content.push({ type: "thinking" as const, thinking: fullThinking });
+        content.push({ type: "text" as const, text: fullText });
+        const partialMsg: Partial<AgentMessage> = { role: "assistant", content };
+        dispatch({ type: "update", message: normalizeToolCalls(partialMsg as AgentMessage) });
         setAgentPhase(null);
         break;
+      }
+      case "thinking_delta": {
+        const turnKey = event.turnIndex;
+        const prevThinking = accumulatedThinking.current.get(turnKey) ?? "";
+        accumulatedThinking.current.set(turnKey, prevThinking + event.text);
+        const fullThinking = accumulatedThinking.current.get(turnKey)!;
+        const fullText = accumulatedText.current.get(turnKey) ?? "";
+        const content: AssistantContentBlock[] = [];
+        content.push({ type: "thinking" as const, thinking: fullThinking });
+        if (fullText) content.push({ type: "text" as const, text: fullText });
+        const partialMsg: Partial<AgentMessage> = { role: "assistant", content };
+        dispatch({ type: "update", message: normalizeToolCalls(partialMsg as AgentMessage) });
+        setAgentPhase(null);
+        break;
+      }
       case "message_added": {
         const completed = event.message as AgentMessage | undefined;
         if (completed) {
