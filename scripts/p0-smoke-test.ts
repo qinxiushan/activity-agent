@@ -582,6 +582,17 @@ async function main() {
   const a14 = adapter.adapt({ type: undefined as unknown as string });
   log("event without type → empty array (defensive)", a14.length === 0);
 
+  // hasFiredDone 跨 prompt 重置测试
+  adapter.reset();
+  const p1end = adapter.adapt({ type: "agent_end", messages: [] });
+  log("agent_end prompt 1 → done emitted", p1end.length > 0);
+  const p2dup = adapter.adapt({ type: "agent_end", messages: [] });
+  log("agent_end prompt 1 dup → idempotent (blocked)", p2dup.length === 0);
+  const p2start = adapter.adapt({ type: "agent_start" });
+  log("agent_start prompt 2 → resets hasFiredDone", (p2start[0] as { type: string }).type === "agent_start");
+  const p2end = adapter.adapt({ type: "agent_end", messages: [] });
+  log("agent_end prompt 2 → done emitted again", p2end.length > 0);
+
   section("🔌 P0 Stage-1: Extensions Phase Guard (T3)");
   const { default: phaseGuardExtension } = await import("../lib/extensions/phase-guard");
 

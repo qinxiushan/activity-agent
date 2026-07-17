@@ -61,6 +61,8 @@ export class EventAdapter {
 
     switch (piEvent.type) {
       case "agent_start":
+        // 重置跨 prompt 状态标志，确保多轮对话中每次 agent 结束都能正常发送 done 事件
+        this.hasFiredDone = false;
         return [{ type: "agent_start", sessionId: this.sessionId }];
 
       case "agent_end":
