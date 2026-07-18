@@ -252,37 +252,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setAgentPhase({ kind: "waiting_model" });
         dispatch({ type: "start" });
         break;
-      case "done": {
-        // pi SDK 持久化消息时不保留 thinking 内容块——只在流式时通过
-        // message_update.thinking_delta 发送。流结束后 thinking 会从消息中消失。
-        // 此处把 accumulator 中的 thinking 注入到最后一条 assistant message 的 content 开头。
-        const finalThinking = (() => {
-          const thinkingMap = accumulatedThinking.current;
-          if (thinkingMap.size === 0) return undefined;
-          const entries = Array.from(thinkingMap.values());
-          return entries.join("");
-        })();
-
+      case "done":
         accumulatedText.current.clear();
         accumulatedThinking.current.clear();
         setAgentRunning(false);
         setAgentPhase(null);
         setRetryInfo(null);
         dispatch({ type: "end" });
-
-        if (finalThinking) {
-          setMessages((prev) => {
-            const idx = prev.length - 1;
-            if (idx < 0) return prev;
-            const last = prev[idx] as import("@/lib/types").AgentMessage & { role: string; content: unknown[] };
-            if (last.role !== "assistant" || !Array.isArray(last.content)) return prev;
-            const hasThinking = last.content.some((b: { type: string }) => b.type === "thinking");
-            if (hasThinking) return prev;
-            const updated = { ...last, content: [{ type: "thinking", thinking: finalThinking }, ...last.content] };
-            return [...prev.slice(0, idx), updated as import("@/lib/types").AgentMessage];
-          });
-        }
-
         if (sessionIdRef.current) {
           loadSession(sessionIdRef.current);
           fetch(`/api/agent/${encodeURIComponent(sessionIdRef.current)}`)
@@ -295,7 +271,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         onAgentEnd?.();
         break;
-      }
       case "text_delta": {
         const turnKey = event.turnIndex;
         const prevText = accumulatedText.current.get(turnKey) ?? "";
