@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { StandardEvent } from "@/lib/event-types";
+import { AgentApiError, extractApiError } from "@/lib/agent-client";
 
 export interface ActivityToolCall {
   id: string;
@@ -83,8 +84,8 @@ function summarizeResult(result: unknown, max = 80): string {
 const PLAN_POLL_ERROR_THRESHOLD = 3;
 
 export interface UseActivitySessionResult extends ActivityState {
-  startSession: (cwd: string, message: string, model: { provider: string; modelId: string }) => Promise<void>;
-  sendMessage: (message: string) => Promise<void>;
+  startSession: (cwd: string, message: string, model: { provider: string; modelId: string }) => Promise<boolean>;
+  sendMessage: (message: string) => Promise<boolean>;
   abort: () => Promise<void>;
   reset: () => void;
   retryPlanPoll: () => Promise<void>;
@@ -273,30 +274,45 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cwd, type: "prompt", message, provider: model.provider, modelId: model.modelId }),
       });
-      if (!res.ok) throw new Error(`create failed: HTTP ${res.status}`);
-      const { sessionId } = (await res.json()) as { sessionId: string };
+      const body = (await res.json().catch(() => ({}))) as { sessionId?: string; error?: string; message?: string; retryAfterMs?: number };
+      if (!res.ok || body.error) throw extractApiError(res.status, body);
+      const { sessionId } = body as { sessionId: string };
       sessionIdRef.current = sessionId;
       setState((prev) => ({ ...prev, sessionId }));
       connectEvents(sessionId);
       startPlanPoll(sessionId);
+      return true;
     } catch (e) {
-      setState((prev) => ({ ...prev, error: (e as Error).message }));
+      setState((prev) => ({ ...prev, error: e instanceof Error ? e.message : String(e) }));
+      return false;
     }
   }, [serverBase, connectEvents, startPlanPoll]);
 
   const sendMessage = useCallback(async (message: string) => {
-    if (inFlightSendRef.current) return;
+    if (inFlightSendRef.current) return false;
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid) return false;
     inFlightSendRef.current = true;
     try {
-      await fetch(`${serverBase}/api/agent/${encodeURIComponent(sid)}`, {
+      const res = await fetch(`${serverBase}/api/agent/${encodeURIComponent(sid)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "prompt", message }),
       });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string; retryAfterMs?: number };
+      if (!res.ok || body.error) {
+        throw extractApiError(res.status, body);
+      }
+      setState((prev) => ({ ...prev, error: null }));
+      return true;
     } catch (e) {
-      setState((prev) => ({ ...prev, error: (e as Error).message }));
+      const messageText = e instanceof AgentApiError
+        ? e.message
+        : e instanceof Error
+          ? e.message
+          : String(e);
+      setState((prev) => ({ ...prev, error: messageText }));
+      return false;
     } finally {
       inFlightSendRef.current = false;
     }

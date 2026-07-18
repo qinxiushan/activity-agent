@@ -92,7 +92,7 @@ function Typewriter({ phrases }: { phrases: string[] }) {
 
 export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onContextUsageChange }: Props) {
   const {
-    loading, error, messages, entryIds, streamState,
+    loading, error, sendError, messages, entryIds, streamState,
     agentRunning, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, displayModel: displayModelValue, sessionStats,
@@ -248,6 +248,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               <line x1="87.5" y1="66.5" x2="85.4" y2="68.6"/>
             </g>
           </svg>
+        </div>
+      )}
+
+      {sendError && (
+        <div className="mx-4 mt-3 rounded-md border border-[rgba(239,68,68,0.28)] bg-[rgba(239,68,68,0.08)] px-3 py-2 text-xs text-red-300">
+          {sendError}
         </div>
       )}
 

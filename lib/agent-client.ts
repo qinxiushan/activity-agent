@@ -1,5 +1,33 @@
 // Client-side helper for POST /api/agent/[id].
 
+export class AgentApiError extends Error {
+  status: number;
+  code?: string;
+  retryAfterMs?: number;
+
+  constructor(message: string, options: { status: number; code?: string; retryAfterMs?: number }) {
+    super(message);
+    this.name = "AgentApiError";
+    this.status = options.status;
+    this.code = options.code;
+    this.retryAfterMs = options.retryAfterMs;
+  }
+}
+
+export function extractApiError(
+  status: number,
+  body: { error?: string; message?: string; retryAfterMs?: number },
+): AgentApiError {
+  return new AgentApiError(
+    body.message ?? body.error ?? `HTTP ${status}`,
+    {
+      status,
+      code: body.error,
+      retryAfterMs: body.retryAfterMs,
+    },
+  );
+}
+
 export async function sendAgentCommand<T = unknown>(
   sessionId: string,
   command: Record<string, unknown>,
@@ -13,9 +41,11 @@ export async function sendAgentCommand<T = unknown>(
     success?: boolean;
     data?: T;
     error?: string;
+    message?: string;
+    retryAfterMs?: number;
   };
   if (!res.ok || body.error) {
-    throw new Error(body.error ?? `HTTP ${res.status}`);
+    throw extractApiError(res.status, body);
   }
   return body.data as T;
 }

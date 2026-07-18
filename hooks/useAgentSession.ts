@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useReducer } from "react";
 import type { AgentMessage, SessionInfo, SessionTreeNode, AssistantContentBlock, TextContent, ThinkingContent } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
-import { sendAgentCommand } from "@/lib/agent-client";
+import { AgentApiError, extractApiError, sendAgentCommand } from "@/lib/agent-client";
 import type { ToolEntry } from "@/components/ToolPanel";
 import type { StandardEvent } from "@/lib/event-types";
 
@@ -91,6 +91,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [data, setData] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(!isNew);
   const [error, setError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [entryIds, setEntryIds] = useState<string[]>([]);
@@ -357,8 +358,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
-    if (!message.trim() && !images?.length) return;
-    if (agentRunning) return;
+    if (!message.trim() && !images?.length) return false;
+    if (agentRunning) return false;
 
     const imageBlocks = images?.map((img) => ({ type: "image" as const, source: { type: "base64" as const, media_type: img.mimeType, data: img.data } }));
     const userMsg: AgentMessage = {
@@ -369,6 +370,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       timestamp: Date.now(),
     };
     setMessages((prev) => [...prev, userMsg]);
+    setError(null);
+    setSendError(null);
     setAgentRunning(true);
     setAgentPhase({ kind: "waiting_model" });
     dispatch({ type: "start" });
@@ -395,9 +398,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
           }),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const result = await res.json() as { sessionId: string };
-        const realId = result.sessionId;
+        const payload = (await res.json().catch(() => ({}))) as { sessionId?: string; error?: string; message?: string; retryAfterMs?: number };
+        if (!res.ok || payload.error) {
+          throw extractApiError(res.status, payload);
+        }
+        const realId = payload.sessionId!;
         sessionIdRef.current = realId;
         connectEvents(realId);
         onSessionCreated?.({
@@ -418,11 +423,28 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           ...(piImages?.length ? { images: piImages } : {}),
         });
       }
+      return true;
     } catch (e) {
       console.error("Failed to send message:", e);
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (
+          last?.role === "user" &&
+          last.timestamp === userMsg.timestamp
+        ) {
+          return prev.slice(0, -1);
+        }
+        return prev;
+      });
+      if (e instanceof AgentApiError) {
+        setSendError(e.message);
+      } else {
+        setSendError(e instanceof Error ? e.message : String(e));
+      }
       setAgentRunning(false);
       setAgentPhase(null);
       dispatch({ type: "end" });
+      return false;
     }
   }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, onSessionCreated]);
 
@@ -506,33 +528,57 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const handleSteer = useCallback(async (message: string, images?: AttachedImage[]) => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
-    setMessages((prev) => [...prev, { role: "user", content: `[steer] ${message}`, timestamp: Date.now() } as AgentMessage]);
+    if (!sid) return false;
+    const userMsg = { role: "user", content: `[steer] ${message}`, timestamp: Date.now() } as AgentMessage;
+    setMessages((prev) => [...prev, userMsg]);
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
     try {
+      setSendError(null);
       await sendAgentCommand(sid, {
         type: "steer",
         message,
         ...(piImages?.length ? { images: piImages } : {}),
       });
+      return true;
     } catch (e) {
       console.error("Failed to steer:", e);
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "user" && last.timestamp === userMsg.timestamp) {
+          return prev.slice(0, -1);
+        }
+        return prev;
+      });
+      setSendError(e instanceof Error ? e.message : String(e));
+      return false;
     }
   }, []);
 
   const handleFollowUp = useCallback(async (message: string, images?: AttachedImage[]) => {
     const sid = sessionIdRef.current;
-    if (!sid) return;
-    setMessages((prev) => [...prev, { role: "user", content: message, timestamp: Date.now() } as AgentMessage]);
+    if (!sid) return false;
+    const userMsg = { role: "user", content: message, timestamp: Date.now() } as AgentMessage;
+    setMessages((prev) => [...prev, userMsg]);
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
     try {
+      setSendError(null);
       await sendAgentCommand(sid, {
         type: "follow_up",
         message,
         ...(piImages?.length ? { images: piImages } : {}),
       });
+      return true;
     } catch (e) {
       console.error("Failed to follow up:", e);
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "user" && last.timestamp === userMsg.timestamp) {
+          return prev.slice(0, -1);
+        }
+        return prev;
+      });
+      setSendError(e instanceof Error ? e.message : String(e));
+      return false;
     }
   }, []);
 
@@ -664,7 +710,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   return {
     // State
-    data, loading, error, activeLeafId, messages, entryIds, streamState,
+    data, loading, error, sendError, activeLeafId, messages, entryIds, streamState,
     agentRunning, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, currentModel, displayModel, sessionStats,

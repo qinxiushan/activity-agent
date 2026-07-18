@@ -15,10 +15,10 @@ interface ModelOption {
 }
 
 interface Props {
-  onSend: (message: string, images?: AttachedImage[]) => void;
+  onSend: (message: string, images?: AttachedImage[]) => Promise<boolean> | boolean;
   onAbort: () => void;
-  onSteer?: (message: string, images?: AttachedImage[]) => void;
-  onFollowUp?: (message: string, images?: AttachedImage[]) => void;
+  onSteer?: (message: string, images?: AttachedImage[]) => Promise<boolean> | boolean;
+  onFollowUp?: (message: string, images?: AttachedImage[]) => Promise<boolean> | boolean;
   isStreaming: boolean;
   model?: { provider: string; modelId: string } | null;
   modelNames?: Record<string, string>;
@@ -158,29 +158,34 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     });
   }, []);
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
     if (isStreaming) return;
-    onSend(msg, attachedImages.length ? attachedImages : undefined);
-    setValue("");
-    clearImages();
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
+    const ok = await onSend(msg, attachedImages.length ? attachedImages : undefined);
+    if (ok !== false) {
+      setValue("");
+      clearImages();
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+      }
     }
   }, [value, attachedImages, isStreaming, onSend, clearImages]);
 
-  const sendQueued = useCallback((mode: "steer" | "followup") => {
+  const sendQueued = useCallback(async (mode: "steer" | "followup") => {
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
+    let ok = true;
     if (mode === "steer" && onSteer) {
-      onSteer(msg, attachedImages.length ? attachedImages : undefined);
+      ok = (await onSteer(msg, attachedImages.length ? attachedImages : undefined)) !== false;
     } else if (mode === "followup" && onFollowUp) {
-      onFollowUp(msg, attachedImages.length ? attachedImages : undefined);
+      ok = (await onFollowUp(msg, attachedImages.length ? attachedImages : undefined)) !== false;
     }
-    setValue("");
-    clearImages();
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    if (ok) {
+      setValue("");
+      clearImages();
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+    }
   }, [value, attachedImages, onSteer, onFollowUp, clearImages]);
 
   const handleKeyDown = useCallback(
@@ -189,9 +194,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         e.preventDefault();
         if (isStreaming && (onSteer || onFollowUp)) {
           // Default Enter sends as steer if available, else followup
-          sendQueued(onSteer ? "steer" : "followup");
+          void sendQueued(onSteer ? "steer" : "followup");
         } else {
-          handleSend();
+          void handleSend();
         }
       }
     },
