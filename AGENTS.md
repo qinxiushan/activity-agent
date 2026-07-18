@@ -318,6 +318,31 @@ Exit codes:
 模型回复异常（thinking 不输出、工具不加载、system prompt 不生效、token 用量异常）时，
 **第一步永远是检查 pi SDK 的三份配置文件**，不要直接跳进代码逻辑排查。
 
+## Shell / Node 环境注意事项
+
+本仓库的 `next dev` 依赖 **Node >= 20.9.0**。当前机器同时存在两套 Node：
+
+- 系统 Node：`/usr/bin/node`（可能是 `v18.x`）
+- `nvm` Node：`~/.nvm/versions/node/...`（当前开发环境实测为 `v22.18.0`）
+
+**关键坑点**：`~/.bashrc` 在非交互 shell 中会提前 `return`，导致后面的 `nvm` 初始化不执行。因此：
+
+- 你手工打开终端运行 `npm run dev` 可能正常（交互 shell，会加载 `nvm`）
+- 自动化代理/脚本若直接跑 `npm run dev`，可能会误用系统 Node 18，随后报 Next.js 版本不满足
+
+排查时先看：
+
+```bash
+which node
+node -v
+```
+
+若需要复现和人工终端一致的环境，优先用交互式 shell 执行：
+
+```bash
+bash -ic 'node -v && npm run dev'
+```
+
 ### 必须检查的 3 个文件
 
 | 文件 | 查什么 | 典型问题 |
