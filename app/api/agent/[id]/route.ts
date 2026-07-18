@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
 import { startRpcSession, getRpcSession } from "@/lib/rpc-manager";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { getCurrentUserIdFromRequest } from "@/lib/user-context";
+import {
+  buildRateLimitHeaders,
+  checkMessageRateLimit,
+  formatRateLimitError,
+  isMessageRateLimitedCommand,
+} from "@/lib/rate-limiter";
 
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
@@ -12,6 +19,17 @@ export async function POST(
 
   try {
     const body = await req.json() as { type: string; [key: string]: unknown };
+    const userId = getCurrentUserIdFromRequest(req);
+
+    if (isMessageRateLimitedCommand(body)) {
+      const verdict = await checkMessageRateLimit(userId);
+      if (!verdict.allowed) {
+        return NextResponse.json(formatRateLimitError(verdict.retryAfterMs), {
+          status: 429,
+          headers: buildRateLimitHeaders(verdict.retryAfterMs),
+        });
+      }
+    }
 
     // Fast path: already-running session
     const existing = getRpcSession(id);

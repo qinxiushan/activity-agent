@@ -29,6 +29,14 @@ import { getWeather } from "../lib/weather-service";
 import { computeRoute, buildRouteChain, haversineMeters } from "../lib/route-service";
 import { isOpenAt, parseHoursString } from "../lib/opening-hours-service";
 import { UserPreferencesStore, DEFAULT_USER_ID, type UserPreferencesDefaults, type UserPreferences } from "../lib/user-preferences";
+import {
+  buildRateLimitHeaders,
+  checkMessageRateLimit,
+  formatRateLimitError,
+  isMessageRateLimitedCommand,
+} from "../lib/rate-limiter";
+import { metrics as registryMetrics } from "../lib/metrics-registry";
+import { closeRedis } from "../lib/redis";
 import { promises as afs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -41,6 +49,10 @@ const log = (label: string, ok: boolean, detail?: string) => {
   else    { fail++; console.log(`  ❌ ${label}${detail ? ` — ${detail}` : ""}`); process.exitCode = 1; }
 };
 const section = (name: string) => console.log(`\n${name}`);
+const restoreEnv = (key: string, value: string | undefined) => {
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+};
 
 async function main() {
   console.log("\n=== SOP-v2 Smoke Test ===\n");
@@ -125,6 +137,46 @@ async function main() {
   // 周一 10:00 闭馆
   const mon10 = isOpenAt(hoursMuseum, new Date("2026-06-08T10:00:00"));
   log("Mon 10:00 closed", mon10.open === false);
+
+  // ─── T2: Rate Limiter ──────────────────────────────────
+  section("🚦 T2: Rate Limiter");
+  delete (globalThis as { __memoryRateLimiter?: Map<string, number[]> }).__memoryRateLimiter;
+  delete (globalThis as { __redisClient?: unknown }).__redisClient;
+  const prevRateLimitEnabled = process.env.RATE_LIMIT_ENABLED;
+  const prevRateLimitMsgs = process.env.RATE_LIMIT_MSGS_PER_MIN;
+  const prevRedisUrl = process.env.REDIS_URL;
+  const rateLimitHitsBefore = registryMetrics.getCounterValue("rate_limit_hits_total", { action: "message" });
+
+  process.env.RATE_LIMIT_ENABLED = "false";
+  log("prompt command is rate-limited", isMessageRateLimitedCommand({ type: "prompt" }));
+  log("get_state command bypasses limiter", !isMessageRateLimitedCommand({ type: "get_state" }));
+  const disabledVerdict = await checkMessageRateLimit("smoke-disabled");
+  log("Disabled mode allows traffic", disabledVerdict.allowed && disabledVerdict.source === "disabled");
+
+  process.env.RATE_LIMIT_ENABLED = "true";
+  process.env.RATE_LIMIT_MSGS_PER_MIN = "2";
+  process.env.REDIS_URL = "redis://127.0.0.1:1";
+  delete (globalThis as { __memoryRateLimiter?: Map<string, number[]> }).__memoryRateLimiter;
+  delete (globalThis as { __redisClient?: unknown }).__redisClient;
+
+  const rl1 = await checkMessageRateLimit("smoke-fallback");
+  const rl2 = await checkMessageRateLimit("smoke-fallback");
+  const rl3 = await checkMessageRateLimit("smoke-fallback");
+  log("Fallback window first request allowed", rl1.allowed && rl1.source === "memory");
+  log("Fallback window second request allowed", rl2.allowed && rl2.remaining === 0);
+  log("Fallback window third request blocked", !rl3.allowed && rl3.retryAfterMs > 0);
+
+  const rateLimitBody = formatRateLimitError(rl3.retryAfterMs);
+  const rateLimitHeaders = buildRateLimitHeaders(rl3.retryAfterMs) as Record<string, string>;
+  log("Rate limit error body shape", rateLimitBody.error === "rate_limited" && rateLimitBody.retryAfterMs === rl3.retryAfterMs);
+  log("Retry-After header emitted", Number(rateLimitHeaders["Retry-After"]) >= 1, rateLimitHeaders["Retry-After"]);
+  const rateLimitHitsAfter = registryMetrics.getCounterValue("rate_limit_hits_total", { action: "message" });
+  log("Rate limit metric increments", rateLimitHitsAfter === rateLimitHitsBefore + 1, `${rateLimitHitsBefore} -> ${rateLimitHitsAfter}`);
+
+  restoreEnv("RATE_LIMIT_ENABLED", prevRateLimitEnabled);
+  restoreEnv("RATE_LIMIT_MSGS_PER_MIN", prevRateLimitMsgs);
+  restoreEnv("REDIS_URL", prevRedisUrl);
+  await closeRedis();
 
   // ─── P0-2: Booking Service ──────────────────────────────
   section("📅 P0-2: Booking Service");

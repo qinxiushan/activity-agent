@@ -135,3 +135,4 @@ metrics.registerCounter("llm_tokens_total", "Total LLM tokens consumed", ["model
 metrics.registerGauge("active_sessions", "Number of active agent sessions");
 metrics.registerCounter("tool_call_total", "Total tool calls", ["tool", "status"]);
 metrics.registerHistogram("turn_duration_seconds", "Turn duration in seconds");
+metrics.registerCounter("rate_limit_hits_total", "Total rate limit hits", ["action"]);

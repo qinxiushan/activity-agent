@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { existsSync } from "fs";
 import { startRpcSession } from "@/lib/rpc-manager";
+import { getCurrentUserIdFromRequest } from "@/lib/user-context";
+import {
+  buildRateLimitHeaders,
+  checkMessageRateLimit,
+  formatRateLimitError,
+  isMessageRateLimitedCommand,
+} from "@/lib/rate-limiter";
 
 // POST /api/agent/new  body: { cwd: string; type: string; message: string; ... }
 // Spawns a brand-new pi session and immediately sends the first command.
@@ -9,12 +16,22 @@ export async function POST(req: Request) {
   try {
     const body = await req.json() as { cwd?: string; [key: string]: unknown };
     const { cwd, ...command } = body;
+    const userId = getCurrentUserIdFromRequest(req);
 
     if (!cwd || typeof cwd !== "string") {
       return NextResponse.json({ error: "cwd is required" }, { status: 400 });
     }
     if (!existsSync(cwd)) {
       return NextResponse.json({ error: `Directory does not exist: ${cwd}` }, { status: 400 });
+    }
+    if (isMessageRateLimitedCommand(command)) {
+      const verdict = await checkMessageRateLimit(userId);
+      if (!verdict.allowed) {
+        return NextResponse.json(formatRateLimitError(verdict.retryAfterMs), {
+          status: 429,
+          headers: buildRateLimitHeaders(verdict.retryAfterMs),
+        });
+      }
     }
 
     // Use a one-time key so startRpcSession's lock doesn't conflict with real session ids
