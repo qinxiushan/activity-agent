@@ -129,6 +129,7 @@ export class EventAdapter {
         const toolCallId = piEvent.toolCallId as string;
         const toolName = piEvent.toolName as string;
         const isError = piEvent.isError === true;
+        const result = (piEvent as { result?: unknown }).result;
         const start = this.toolStartTimes.get(toolCallId) ?? Date.now();
         this.toolStartTimes.delete(toolCallId);
         return [
@@ -138,6 +139,7 @@ export class EventAdapter {
             toolCallId,
             isError,
             durationMs: Date.now() - start,
+            result,
           },
         ];
       }

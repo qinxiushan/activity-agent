@@ -44,6 +44,7 @@ export type StandardEvent =
       toolCallId: string;
       isError: boolean;
       durationMs: number;
+      result?: unknown;
     }
   | {
       type: "turn_end";

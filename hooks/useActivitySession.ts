@@ -232,10 +232,11 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
           }
           case "tool_end": {
             const id = ev.toolCallId ?? "";
+            const result = (ev as { result?: unknown }).result;
             setState((prev) => ({
               ...prev,
               toolCalls: prev.toolCalls.map((t) => t.id === id
-                ? { ...t, ok: !ev.isError, endedAt: Date.now() }
+                ? { ...t, ok: !ev.isError, endedAt: Date.now(), result: result ?? t.result, resultSummary: result ? summarizeResult(result) : t.resultSummary }
                 : t),
             }));
             break;
