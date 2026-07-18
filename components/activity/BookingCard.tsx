@@ -19,14 +19,17 @@ function extractBooking(toolCalls: ActivityToolCall[]): BookingDetails | null {
     if (!tc.ok) continue;
     const parsed = parseBookingResult(tc.result);
     if (!parsed) continue;
-    const orderId = (parsed.orderId as string) ?? "";
+    // Tool 返回 { content, details: { orderId, status, restaurantName, ... } }
+    // pi SDK 可能把 details 展开到顶层，也可能保留嵌套——两处都查
+    const data = (parsed.details as Record<string, unknown> | undefined) ?? parsed;
+    const orderId = (data.orderId as string) ?? "";
     if (!orderId) continue;
-    const restaurantName = (parsed.restaurantName as string) ?? "";
-    const date = (parsed.date as string) ?? "";
-    const time = (parsed.time as string) ?? "";
-    const partySize = typeof parsed.partySize === "number" ? parsed.partySize : 2;
-    const confirmationCode = (parsed.confirmationCode as string | undefined) ?? (parsed.code as string | undefined);
-    const status = (parsed.status as string) ?? "unknown";
+    const restaurantName = (data.restaurantName as string) ?? "";
+    const date = (data.date as string) ?? "";
+    const time = (data.time as string) ?? "";
+    const partySize = typeof data.partySize === "number" ? data.partySize : 2;
+    const confirmationCode = (data.confirmationCode as string | undefined) ?? (data.code as string | undefined);
+    const status = (data.status as string) ?? "unknown";
     return { orderId, restaurantName, date, time, partySize, confirmationCode, status };
   }
   return null;
