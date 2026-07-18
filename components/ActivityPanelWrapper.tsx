@@ -51,6 +51,14 @@ export function ActivityPanelWrapper({
         display: "flex", alignItems: "center", gap: 8,
       }}>
         <div style={{
+          fontSize: 12,
+          color: "var(--text)",
+          fontWeight: 700,
+          letterSpacing: 0.2,
+        }}>
+          Activity Panel
+        </div>
+        <div style={{
           fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase",
           letterSpacing: 0.6, fontWeight: 600,
         }}>

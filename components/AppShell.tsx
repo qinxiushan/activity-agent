@@ -14,6 +14,7 @@ import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 
 export function AppShell() {
+  const MOBILE_BREAKPOINT_PX = 960;
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isDark, toggleTheme } = useTheme();
@@ -27,6 +28,7 @@ export function AppShell() {
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
 
@@ -102,6 +104,19 @@ export function AppShell() {
         }
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`);
+    const apply = (matches: boolean) => {
+      setIsMobileViewport(matches);
+      setSidebarOpen((prev) => (matches ? prev : true));
+    };
+    apply(media.matches);
+    const onChange = (event: MediaQueryListEvent) => apply(event.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
   }, []);
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -325,8 +340,8 @@ export function AppShell() {
           inset: 0,
           zIndex: 199,
           background: "rgba(0,0,0,0.4)",
-          opacity: sidebarOpen ? 1 : 0,
-          pointerEvents: sidebarOpen ? "auto" : "none",
+          opacity: isMobileViewport && sidebarOpen ? 1 : 0,
+          pointerEvents: isMobileViewport && sidebarOpen ? "auto" : "none",
           transition: "opacity 0.25s ease",
         }}
       />

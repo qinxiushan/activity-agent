@@ -1,9 +1,12 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page, type Locator } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 const SCREENSHOT_DIR = join(process.cwd(), "tests", "__screenshots__");
 mkdirSync(SCREENSHOT_DIR, { recursive: true });
+
+const activityPanelHeading = (page: Page): Locator =>
+  page.getByText("Activity Panel", { exact: true }).first();
 
 /**
  * Visual regression for the activity panel (right side of home page).
@@ -17,7 +20,7 @@ mkdirSync(SCREENSHOT_DIR, { recursive: true });
 test.describe("Activity page visual", () => {
   test("light mode — empty state", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator("text=Activity Panel")).toBeVisible({ timeout: 10_000 });
+    await expect(activityPanelHeading(page)).toBeVisible({ timeout: 10_000 });
     await page.evaluate(() => {
       document.documentElement.classList.remove("dark");
       try { localStorage.setItem("pi-theme", "light"); } catch {}
@@ -31,7 +34,7 @@ test.describe("Activity page visual", () => {
 
   test("dark mode — empty state", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator("text=Activity Panel")).toBeVisible({ timeout: 10_000 });
+    await expect(activityPanelHeading(page)).toBeVisible({ timeout: 10_000 });
     // Force dark mode via theme toggle
     await page.locator('button[aria-label="Switch to dark mode"]').click();
     // Wait for view transition + class flip
@@ -48,7 +51,7 @@ test.describe("Activity page visual", () => {
 
   test("light mode — activity textarea accepts typed prompt", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator("text=Activity Panel")).toBeVisible({ timeout: 10_000 });
+    await expect(activityPanelHeading(page)).toBeVisible({ timeout: 10_000 });
     await page.evaluate(() => {
       document.documentElement.classList.remove("dark");
       try { localStorage.setItem("pi-theme", "light"); } catch {}
@@ -64,7 +67,7 @@ test.describe("Activity page visual", () => {
 
   test("phase progress component renders all 7 phase labels", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator("text=Activity Panel")).toBeVisible({ timeout: 10_000 });
+    await expect(activityPanelHeading(page)).toBeVisible({ timeout: 10_000 });
     // Phase labels from PhaseProgress.tsx
     const expectedLabels = ["待命", "意图捕获", "追问", "自动规划", "等待确认", "执行预订", "完成"];
     for (const label of expectedLabels) {
@@ -75,8 +78,12 @@ test.describe("Activity page visual", () => {
 
 test.describe("User Preferences Panel", () => {
   test("renders empty-state when no prefs exist", async ({ page }) => {
+    const resetRes = await page.request.post("/api/user-preferences", {
+      data: { action: "reset" },
+    });
+    expect(resetRes.ok()).toBeTruthy();
     await page.goto("/");
-    await expect(page.locator("text=Activity Panel")).toBeVisible({ timeout: 10_000 });
+    await expect(activityPanelHeading(page)).toBeVisible({ timeout: 10_000 });
     await expect(page.locator("text=用户偏好")).toBeVisible();
     await expect(page.locator("text=/方案 \\d+ · 预订 \\d+/")).toBeVisible();
     const placeholder = page.locator("text=暂无偏好").first();
