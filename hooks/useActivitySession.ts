@@ -190,7 +190,6 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
             break;
           case "done":
             setState((prev) => {
-              const sid = sessionIdRef.current;
               if (sid) toolCallsBySession.current.set(sid, prev.toolCalls);
               return { ...prev, agentRunning: false };
             });
