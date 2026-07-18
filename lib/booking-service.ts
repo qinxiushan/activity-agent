@@ -16,10 +16,12 @@
  * - 通知：写入会话文件 + 控制台日志（生产可换 webhook/邮件）
  */
 
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import { getBookingRepo } from "./storage";
 import { getPOIById } from "./poi-database";
+
+function isFileBackend(): boolean {
+  return process.env.STORAGE_BACKEND !== "postgres";
+}
 
 // ─── 类型定义 ──────────────────────────────────────────────────────
 
@@ -77,34 +79,26 @@ const DEFAULT_CONFIG: BookingServiceConfig = {
 // ─── BookingService 类 ─────────────────────────────────────────────
 
 export class BookingService {
-  private readonly storageDir: string;
   private readonly config: BookingServiceConfig;
-  /** 内存缓存：orderId → Order */
+  /** 内存缓存：orderId → Order（状态机操作需要内存态） */
   private readonly cache = new Map<string, BookingOrder>();
   private initPromise: Promise<void> | null = null;
 
   constructor(config: Partial<BookingServiceConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.storageDir = this.config.storageDir ?? path.join(os.homedir(), ".pi", "agent", "bookings");
   }
 
   private async ensureInit(): Promise<void> {
-    if (!this.initPromise) {
-      this.initPromise = (async () => {
-        await fs.mkdir(this.storageDir, { recursive: true });
-        // 加载已有订单
-        try {
-          const files = await fs.readdir(this.storageDir);
-          for (const f of files.filter((f) => f.endsWith(".json"))) {
-            const content = await fs.readFile(path.join(this.storageDir, f), "utf-8");
-            const order = JSON.parse(content) as BookingOrder;
-            this.cache.set(order.orderId, order);
-          }
-        } catch {
-          // 首次启动，目录为空
-        }
-      })();
-    }
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = (async () => {
+      if (isFileBackend()) {
+        // file 模式：从 repo 扫描全量加载进 cache（兼容旧行为）
+        const orders = await getBookingRepo().listAll();
+        for (const order of orders) this.cache.set(order.orderId, order);
+      }
+      // pg 模式：cache 由 createBooking 写入维持（状态机需要内存态），
+      // 查询走 repo 直接 SQL
+    })();
     return this.initPromise;
   }
 
@@ -217,20 +211,24 @@ export class BookingService {
 
   async getOrder(orderId: string): Promise<BookingOrder | undefined> {
     await this.ensureInit();
-    return this.cache.get(orderId);
+    const cached = this.cache.get(orderId);
+    if (cached) return cached;
+    const fromRepo = await getBookingRepo().load(orderId);
+    if (fromRepo) {
+      this.cache.set(fromRepo.orderId, fromRepo);
+      return fromRepo;
+    }
+    return undefined;
   }
 
   async getOrdersByUser(userId: string): Promise<BookingOrder[]> {
-    await this.ensureInit();
-    return Array.from(this.cache.values())
-      .filter((o) => o.userId === userId)
-      .sort((a, b) => b.createdAt - a.createdAt);
+    return getBookingRepo().listByUser(userId);
   }
 
   async getActiveOrders(userId: string): Promise<BookingOrder[]> {
-    await this.ensureInit();
-    return Array.from(this.cache.values())
-      .filter((o) => o.userId === userId && (o.status === "pending" || o.status === "processing"))
+    const orders = await getBookingRepo().listByUser(userId);
+    return orders
+      .filter((o) => o.status === "pending" || o.status === "processing")
       .sort((a, b) => b.createdAt - a.createdAt);
   }
 
@@ -259,8 +257,7 @@ export class BookingService {
   // ─── 持久化 ──────────────────────────────────────────────────
 
   private async persist(order: BookingOrder): Promise<void> {
-    const file = path.join(this.storageDir, `${order.orderId}.json`);
-    await fs.writeFile(file, JSON.stringify(order, null, 2), "utf-8");
+    await getBookingRepo().save(order);
   }
 
   // ─── 工具方法 ────────────────────────────────────────────────

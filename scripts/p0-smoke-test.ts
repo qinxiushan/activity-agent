@@ -13,7 +13,7 @@
  */
 
 import { searchPOIs, getDatabaseStats, getSupportedCities, getPOIById } from "../lib/poi-database";
-import { BookingService, BookingError } from "../lib/booking-service";
+import { BookingService, BookingError, type BookingOrder } from "../lib/booking-service";
 import {
   withPlanState,
   PlanStateManager,
@@ -22,12 +22,13 @@ import {
   describeWaitingFor,
   getMissingCriticalFields,
   MAX_CLARIFICATIONS,
+  type PlanState,
 } from "../lib/plan-state";
 import { wrapToolWithResilience, getRecentMetrics, clearMetrics, recordToolMetric } from "../lib/tool-wrapper";
 import { getWeather } from "../lib/weather-service";
 import { computeRoute, buildRouteChain, haversineMeters } from "../lib/route-service";
 import { isOpenAt, parseHoursString } from "../lib/opening-hours-service";
-import { UserPreferencesStore, DEFAULT_USER_ID, type UserPreferencesDefaults } from "../lib/user-preferences";
+import { UserPreferencesStore, DEFAULT_USER_ID, type UserPreferencesDefaults, type UserPreferences } from "../lib/user-preferences";
 import { promises as afs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -771,6 +772,112 @@ async function main() {
   const initSql = await afs.readFile(path.join(process.cwd(), "db", "migrations", "001_init.sql"), "utf-8");
   for (const table of ["plan_states", "bookings", "user_profiles", "audit_logs", "users"]) {
     log(`001_init.sql creates table ${table}`, initSql.includes(`CREATE TABLE IF NOT EXISTS ${table}`));
+  }
+
+  // ─── 阶段 2 T1: Storage Repository 层（file-repo CRUD，无条件跑）───
+  section("🗄️ Stage-2 T1: Storage repos (file)");
+  const {
+    createFilePlanStateRepo,
+    createFileBookingRepo,
+    createFileUserProfileRepo,
+  } = await import("../lib/storage/file-repos");
+  const tmpRepoDir = path.join(tmpRoot, "repos-test");
+
+  // PlanStateRepo (file)
+  {
+    const repo = createFilePlanStateRepo();
+    const ps: PlanState = {
+      sessionId: "repo-test-sess",
+      phase: "planning",
+      turnCount: 1,
+      clarificationCount: 0,
+      intent: { date: "2026-07-25" },
+      plan: null,
+      history: [{ phase: "intent_capture", at: Date.now() }],
+      lastTransitionAt: Date.now(),
+    };
+    await repo.save(ps);
+    const loaded = await repo.load("repo-test-sess");
+    log("PlanStateRepo save→load: sessionId", loaded?.sessionId === "repo-test-sess");
+    log("PlanStateRepo save→load: phase", loaded?.phase === "planning");
+    try { await afs.unlink(path.join(os.homedir(), ".pi", "agent", "plan-states", "repo-test-sess.json")); } catch {}
+    const gone = await repo.load("repo-test-sess");
+    log("PlanStateRepo load after delete → null", gone === null);
+  }
+
+  // BookingRepo (file)
+  {
+    const repo = createFileBookingRepo();
+    const order: BookingOrder = {
+      orderId: "repo-test-ord",
+      userId: "testuser",
+      status: "pending" as const,
+      restaurantId: "r001",
+      restaurantName: "Test Restaurant",
+      date: "2026-07-25",
+      time: "12:00",
+      partySize: 2,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      retryCount: 0,
+    };
+    await repo.save(order);
+    const loaded = await repo.load("repo-test-ord");
+    log("BookingRepo save→load: orderId", loaded?.orderId === "repo-test-ord");
+    log("BookingRepo save→load: status", loaded?.status === "pending");
+    try { await afs.unlink(path.join(os.homedir(), ".pi", "agent", "bookings", "repo-test-ord.json")); } catch {}
+  }
+
+  // UserProfileRepo (file)
+  {
+    const repo = createFileUserProfileRepo();
+    const prefs: UserPreferences = {
+      userId: "repo-test-user",
+      updatedAt: Date.now(),
+      defaults: { partySize: 3, budgetPerPerson: 200 },
+      stats: { totalSessions: 1, totalBookings: 0, totalCompletedPlans: 0, favoriteRestaurants: [], favoriteCategories: [], averageBudget: 0 },
+      recentSessions: [],
+    };
+    await repo.save(prefs);
+    const loaded = await repo.load("repo-test-user");
+    log("UserProfileRepo save→load: userId", loaded?.userId === "repo-test-user");
+    log("UserProfileRepo save→load: defaults.partySize", loaded?.defaults.partySize === 3);
+    try { await afs.unlink(path.join(os.homedir(), ".pi", "agent", "user-profiles", "repo-test-user.json")); } catch {}
+  }
+
+  // ─── 阶段 2 T1: PG repo 合约测试（DATABASE_URL 存在才跑）────────
+  const pgReady = typeof REAL_DATABASE_URL === "string" && REAL_DATABASE_URL.length > 0;
+  if (pgReady) {
+    process.env.DATABASE_URL = REAL_DATABASE_URL;
+    process.env.STORAGE_BACKEND = "postgres";
+    const pg = await import("../lib/storage/pg-repos");
+    const repo = pg.createPgPlanStateRepo();
+    try {
+      const ps: PlanState = {
+        sessionId: "pg-test-" + Date.now(),
+        phase: "idle" as const,
+        turnCount: 0,
+        clarificationCount: 0,
+        intent: {},
+        plan: null,
+        history: [{ phase: "idle", at: Date.now() }],
+        lastTransitionAt: Date.now(),
+      };
+      await repo.save(ps);
+      const loaded = await repo.load(ps.sessionId);
+      log("PgPlanStateRepo save→load: sessionId", loaded?.sessionId === ps.sessionId);
+      log("PgPlanStateRepo save→load: phase=idle", loaded?.phase === "idle");
+      log("PgPlanStateRepo listAll returns >=1", (await repo.listAll()).length >= 1);
+      // 清理
+      const { getPool } = await import("../lib/db");
+      await getPool().query("DELETE FROM plan_states WHERE session_id=$1", [ps.sessionId]);
+    } catch (e) {
+      log("PgPlanStateRepo (PG reachable, CRUD should work)", false, String(e));
+    } finally {
+      delete process.env.STORAGE_BACKEND;
+    }
+  } else {
+    console.log("  ⏭  PG repo tests skipped (DATABASE_URL not set).");
   }
 
   await afs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});

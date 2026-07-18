@@ -16,14 +16,12 @@
  * v1：单用户 ("default")，与 BookingOrder.userId 硬编码保持一致。
  */
 
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import type { CapturedIntent, PlanState } from "./plan-state";
 import { getBookingService } from "./booking-service";
+import { getUserProfileRepo, getPlanStateRepo } from "./storage";
+import { createFilePlanStateRepo } from "./storage/file-repos";
 
 export const DEFAULT_USER_ID = "default";
-const STORAGE_DIR = path.join(os.homedir(), ".pi", "agent", "user-profiles");
 const RECENT_SESSIONS_MAX = 5;
 // A field becomes a "default" only if it appears in >= this fraction of past sessions
 const DEFAULT_THRESHOLD = 0.5;
@@ -85,13 +83,11 @@ export type AutoFillField = (typeof AUTO_FILL_FIELDS)[number];
 
 export class UserPreferencesStore {
   readonly userId: string;
-  private readonly storageDir: string;
   private cache: UserPreferences | null = null;
   private initPromise: Promise<void> | null = null;
 
-  constructor(userId: string = DEFAULT_USER_ID, storageDir?: string) {
+  constructor(userId: string = DEFAULT_USER_ID, _storageDir?: string) {
     this.userId = userId;
-    this.storageDir = storageDir ?? STORAGE_DIR;
   }
 
   // ─── I/O ────────────────────────────────────────────────────
@@ -100,14 +96,8 @@ export class UserPreferencesStore {
     if (this.cache) return;
     if (!this.initPromise) {
       this.initPromise = (async () => {
-        await fs.mkdir(this.storageDir, { recursive: true });
-        const file = path.join(this.storageDir, `${this.userId}.json`);
-        try {
-          const content = await fs.readFile(file, "utf-8");
-          this.cache = JSON.parse(content) as UserPreferences;
-        } catch {
-          this.cache = this.empty();
-        }
+        const data = await getUserProfileRepo().load(this.userId);
+        this.cache = data ?? this.empty();
       })();
     }
     return this.initPromise;
@@ -139,8 +129,7 @@ export class UserPreferencesStore {
     await this.ensureInit();
     prefs.updatedAt = Date.now();
     this.cache = prefs;
-    const file = path.join(this.storageDir, `${this.userId}.json`);
-    await fs.writeFile(file, JSON.stringify(prefs, null, 2), "utf-8");
+    await getUserProfileRepo().save(prefs);
   }
 
   async reset(): Promise<void> {
@@ -218,22 +207,16 @@ export class UserPreferencesStore {
 
   // ─── 从历史全量重导 ──────────────────────────────────────────
 
-  async refreshFromHistory(planStatesDir?: string): Promise<UserPreferences> {
+  async refreshFromHistory(_planStatesDir?: string): Promise<UserPreferences> {
     await this.ensureInit();
-    const psDir = planStatesDir ?? path.join(os.homedir(), ".pi", "agent", "plan-states");
-
-    // 1. 加载所有 plan-states（仅保留有 intent 的）
-    const planStates: PlanState[] = [];
-    try {
-      const files = await fs.readdir(psDir);
-      for (const f of files.filter((f) => f.endsWith(".json"))) {
-        try {
-          const content = await fs.readFile(path.join(psDir, f), "utf-8");
-          const ps = JSON.parse(content) as PlanState;
-          if (ps.intent && Object.keys(ps.intent).length > 0) planStates.push(ps);
-        } catch { /* skip malformed */ }
-      }
-    } catch { /* dir doesn't exist */ }
+    // 1. 加载所有 plan-states（通过 repo，file 和 pg 均统一）
+    const repo = _planStatesDir && process.env.STORAGE_BACKEND !== "postgres"
+      ? createFilePlanStateRepo(_planStatesDir)
+      : getPlanStateRepo();
+    const allStates = await repo.listAll();
+    const planStates: PlanState[] = allStates.filter(
+      (ps) => ps.intent && Object.keys(ps.intent).length > 0,
+    );
 
     if (planStates.length === 0) {
       const empty = this.empty();
