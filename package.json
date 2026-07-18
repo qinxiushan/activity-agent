@@ -10,14 +10,19 @@
     "test:smoke": "tsx scripts/p0-smoke-test.ts",
     "e2e:real": "tsx scripts/e2e-real-llm-test.ts",
     "e2e": "tsx scripts/e2e-with-server.ts",
-    "test:visual": "playwright test"
+    "test:visual": "playwright test",
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "infra:up": "docker compose -f docker-compose.dev.yml up -d --wait",
+    "infra:down": "docker compose -f docker-compose.dev.yml down"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.75.5",
     "@earendil-works/pi-coding-agent": "^0.75.5",
     "@lobehub/icons": "^5.6.0",
     "@types/react-syntax-highlighter": "^15.5.13",
+    "ioredis": "^5.11.1",
     "next": "16.2.1",
+    "pg": "^8.22.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
@@ -29,6 +34,7 @@
     "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4.2.2",
     "@types/node": "^25",
+    "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

@@ -1,0 +1,43 @@
+# docker-compose.dev.yml — 开发依赖（仅 PostgreSQL + Redis，不含 App）
+#
+# 用途：本地开发 / CI 中拉起阶段 2 基础设施。
+# App 仍然用 `npm run dev` 在宿主机跑（端口 30142）。
+# 全栈 compose（含 App/Prometheus/Grafana）在 T4/T5 交付，见 docker-compose.yml。
+#
+# 用法：
+#   npm run infra:up      # = docker compose -f docker-compose.dev.yml up -d --wait
+#   npm run infra:down    # = docker compose -f docker-compose.dev.yml down
+#
+# 端口刻意避开默认值（55432/56379），避免与本机已有 PG/Redis 冲突。
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: activity-agent-pg-dev
+    environment:
+      POSTGRES_USER: activity
+      POSTGRES_PASSWORD: activity_dev
+      POSTGRES_DB: activity_agent
+    ports:
+      - "55432:5432"
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U activity -d activity_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: activity-agent-redis-dev
+    ports:
+      - "56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata-dev: {}

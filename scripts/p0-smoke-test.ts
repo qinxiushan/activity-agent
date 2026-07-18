@@ -44,6 +44,15 @@ const section = (name: string) => console.log(`\n${name}`);
 async function main() {
   console.log("\n=== SOP-v2 Smoke Test ===\n");
 
+  // 确定性保证：smoke 不依赖外部基础设施。
+  // 若 shell 环境带了 DATABASE_URL/REDIS_URL（如开发者 export 过），
+  // 先摘除，避免 health/T0 断言受宿主环境影响。T1 的 pg 合约测试
+  // 会用 REAL_DATABASE_URL 做条件执行。
+  const REAL_DATABASE_URL = process.env.DATABASE_URL;
+  void REAL_DATABASE_URL;
+  delete process.env.DATABASE_URL;
+  delete process.env.REDIS_URL;
+
   // ─── P0-1: POI Database（含 openingHours）────────────────────
   section("📍 P0-1: POI Database");
   const stats = getDatabaseStats();
@@ -130,8 +139,17 @@ async function main() {
   log("Order created with ORD- prefix", order.orderId.startsWith("ORD-"), order.orderId);
   log("Initial status pending/processing", ["pending", "processing"].includes(order.status));
 
-  await new Promise((r) => setTimeout(r, 200));
-  const fetched = await svc.getOrder(order.orderId);
+  // 轮询代替固定 200ms 等待：processingDelayMs=50 + 3 次异步落盘在系统高负载
+  // （如并行 docker pull / dev server 编译）时可能超过 200ms，导致偶发 flake
+  let fetched = await svc.getOrder(order.orderId);
+  const pollDeadline = Date.now() + 2_000;
+  while (
+    fetched?.status !== "confirmed" && fetched?.status !== "notified" &&
+    Date.now() < pollDeadline
+  ) {
+    await new Promise((r) => setTimeout(r, 50));
+    fetched = await svc.getOrder(order.orderId);
+  }
   log("Reached confirmed/notified", fetched?.status === "confirmed" || fetched?.status === "notified", fetched?.status);
   log("Has confirmation code", !!fetched?.confirmationCode);
 
@@ -711,6 +729,49 @@ async function main() {
     { type: "text", text: "world" },
   ]);
   log("extractTextFromContent joins text blocks", extracted === "hello\nworld");
+
+  // ─── 阶段 2 T0: 基础设施连接层（db / redis / health 扩展）─────
+  section("🏗️ Stage-2 T0: Infra plumbing (db / redis / health)");
+  const db = await import("../lib/db");
+  const redis = await import("../lib/redis");
+
+  // 未配置行为（env 已在 main 顶部摘除）
+  log("isDbConfigured=false when DATABASE_URL unset", db.isDbConfigured() === false);
+  log("isRedisConfigured=false when REDIS_URL unset", redis.isRedisConfigured() === false);
+  log("getPool throws when unconfigured", (() => {
+    try { db.getPool(); return false; } catch { return true; }
+  })());
+  log("getRedis throws when unconfigured", (() => {
+    try { redis.getRedis(); return false; } catch { return true; }
+  })());
+  log("pingDb=false (no throw) when unconfigured", (await db.pingDb(200)) === false);
+  log("pingRedis=false (no throw) when unconfigured", (await redis.pingRedis(200)) === false);
+
+  // 已配置但不可达：ping 限时返回 false，不抛错、不悬挂
+  process.env.DATABASE_URL = "postgres://nobody:nope@127.0.0.1:1/nodb";
+  process.env.REDIS_URL = "redis://127.0.0.1:1";
+  log("pingDb=false when PG unreachable", (await db.pingDb(500)) === false);
+  log("pingRedis=false when Redis unreachable", (await redis.pingRedis(500)) === false);
+  await db.closePool();
+  await redis.closeRedis();
+  delete process.env.DATABASE_URL;
+  delete process.env.REDIS_URL;
+
+  // health readiness：未配置 → skipped，不阻塞 ready
+  const { runReadinessChecks: readyT0 } = await import("../lib/health");
+  const readyRes = await readyT0();
+  log("health: postgres_reachable='skipped' when unset", readyRes.checks.postgres_reachable === "skipped");
+  log("health: redis_reachable='skipped' when unset", readyRes.checks.redis_reachable === "skipped");
+  log("health: skipped deps do not block ready", readyRes.ok === true);
+
+  // 迁移文件存在且被迁移器可见
+  const migrationFiles = (await afs.readdir(path.join(process.cwd(), "db", "migrations")))
+    .filter((f) => f.endsWith(".sql")).sort();
+  log("db/migrations has 001_init.sql", migrationFiles[0] === "001_init.sql", migrationFiles.join(", "));
+  const initSql = await afs.readFile(path.join(process.cwd(), "db", "migrations", "001_init.sql"), "utf-8");
+  for (const table of ["plan_states", "bookings", "user_profiles", "audit_logs", "users"]) {
+    log(`001_init.sql creates table ${table}`, initSql.includes(`CREATE TABLE IF NOT EXISTS ${table}`));
+  }
 
   await afs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
 

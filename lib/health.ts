@@ -13,14 +13,25 @@
  * 4. user-profiles 目录可写（用户偏好）
  * 5. 内存使用 < 90%（防止 OOM）
  * 6. 活跃 session 数（信息性，不阻塞）
+ * 7. PostgreSQL 可达（阶段 2，仅当 DATABASE_URL 配置时纳入判定，否则 "skipped"）
+ * 8. Redis 可达（阶段 2，仅当 REDIS_URL 配置时纳入判定，否则 "skipped"）
  */
 
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { isDbConfigured, pingDb } from "./db";
+import { isRedisConfigured, pingRedis } from "./redis";
 
 const PI_AGENT_DIR = path.join(os.homedir(), ".pi", "agent");
 const MEMORY_HARD_LIMIT_MB = 1536;
+
+/**
+ * 外部依赖检查值：
+ * - true/false：已配置该依赖，探测成功/失败
+ * - "skipped"：未配置（不纳入 ready 判定）
+ */
+export type DependencyCheck = boolean | "skipped";
 
 export interface HealthCheckResult {
   ok: boolean;
@@ -31,6 +42,8 @@ export interface HealthCheckResult {
     bookings_dir_writable: boolean;
     user_profiles_dir_writable: boolean;
     memory_under_threshold: boolean;
+    postgres_reachable: DependencyCheck;
+    redis_reachable: DependencyCheck;
   };
   details?: {
     memoryUsedMb: number;
@@ -113,26 +126,36 @@ export async function runReadinessChecks(): Promise<HealthCheckResult> {
       bookings_dir_writable: false,
       user_profiles_dir_writable: false,
       memory_under_threshold: false,
+      postgres_reachable: "skipped",
+      redis_reachable: "skipped",
     },
   };
 
   try {
-    // 并行检查所有目录（加速）
-    const dirChecks = await Promise.all(
-      REQUIRED_DIRS.map((name) => checkDirWritable(path.join(PI_AGENT_DIR, name))),
-    );
+    // 并行检查所有目录 + 外部依赖（加速）
+    const [dirChecks, pgReachable, redisReachable] = await Promise.all([
+      Promise.all(
+        REQUIRED_DIRS.map((name) => checkDirWritable(path.join(PI_AGENT_DIR, name))),
+      ),
+      isDbConfigured() ? pingDb() : Promise.resolve<DependencyCheck>("skipped"),
+      isRedisConfigured() ? pingRedis() : Promise.resolve<DependencyCheck>("skipped"),
+    ]);
     result.checks.sessions_dir_writable = dirChecks[0];
     result.checks.plan_states_dir_writable = dirChecks[1];
     result.checks.bookings_dir_writable = dirChecks[2];
     result.checks.user_profiles_dir_writable = dirChecks[3];
+    result.checks.postgres_reachable = pgReachable;
+    result.checks.redis_reachable = redisReachable;
 
     // 内存检查
     const mem = getMemoryUsage();
     result.checks.memory_under_threshold =
       mem.usedMb / mem.limitMb < MEMORY_THRESHOLD_PERCENT;
 
-    // 计算整体 ok 状态
-    result.ok = Object.values(result.checks).every(Boolean);
+    // 计算整体 ok 状态（"skipped" 不阻塞 ready）
+    result.ok = Object.values(result.checks).every(
+      (v) => v === true || v === "skipped",
+    );
 
     // 详细信息（即使失败也返回，便于调试）
     result.details = {

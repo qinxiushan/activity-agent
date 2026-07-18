@@ -302,6 +302,17 @@ Exit codes:
 - `2` — preflight failed (no model / dev server unreachable)
 - `3` — runtime error (LLM crashed, HTTP error)
 
+## Repository Rules
+
+- **`docs/` is local-only**: Never commit files under `docs/`. This directory is already
+  in `.gitignore`, so it's enforced technically — the rule here is to make the intent
+  explicit. `docs/` holds personal study notes, retrospectives, project analyses,
+  and learning materials. They are not part of the shipped product. If you see a
+  warning about `git add -f`, that's expected — the `.gitignore` is doing its job.
+  If you must reference a doc from code (e.g. `AGENTS.md`), the doc must live
+  outside `docs/` and be committed normally.
+- If the above rule changes in the future, update `.gitignore` accordingly.
+
 ## Changelog Convention
 
 Every bug fix, improvement, refactor, security patch, or performance optimization
