@@ -96,6 +96,7 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
   const esRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const planPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const toolCallsBySession = useRef<Map<string, ActivityToolCall[]>>(new Map());
   const inFlightSendRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -188,7 +189,11 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
             setState((prev) => ({ ...prev, agentRunning: true }));
             break;
           case "done":
-            setState((prev) => ({ ...prev, agentRunning: false }));
+            setState((prev) => {
+              const sid = sessionIdRef.current;
+              if (sid) toolCallsBySession.current.set(sid, prev.toolCalls);
+              return { ...prev, agentRunning: false };
+            });
             break;
           case "message_added": {
             const m = ev.message as { role?: string; content?: Array<{ type: string; text?: string }> | string } | undefined;
@@ -323,11 +328,13 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
 
   const trackSession = useCallback((sid: string) => {
     sessionIdRef.current = sid;
+    // 从缓存恢复该会话的工具调用，避免切换会话后 tool 时间线/BookingCard 丢失
+    const cached = toolCallsBySession.current.get(sid) ?? [];
     setState((prev) => ({
       ...INITIAL,
       sessionId: sid,
       messages: prev.messages,
-      toolCalls: prev.toolCalls,
+      toolCalls: cached.length > 0 ? cached : prev.toolCalls,
     }));
     connectEvents(sid);
     startPlanPoll(sid);

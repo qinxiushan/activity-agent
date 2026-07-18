@@ -55,12 +55,14 @@ export function BookingCard({ toolCalls, planState }: { toolCalls: ActivityToolC
       }}>
         <div style={{
           fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase",
-          letterSpacing: 0.6, marginBottom: 12, fontWeight: 600,
+          letterSpacing: 0.6, marginBottom: 8, fontWeight: 600,
         }}>
-          预订中…
+          {planState?.phase === "completed" ? "预订已完成" : "预订中…"}
         </div>
         <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-          正在调用 reservation_exec…
+          {planState?.phase === "completed"
+            ? "订单详情将在下次查看时显示。"
+            : "正在调用 reservation_exec…"}
         </div>
       </div>
     );

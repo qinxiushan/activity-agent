@@ -260,7 +260,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setRetryInfo(null);
         dispatch({ type: "end" });
         if (sessionIdRef.current) {
-          loadSession(sessionIdRef.current);
+          // 仅刷新元数据（contextUsage / systemPrompt），不替换消息。
+          // 消息已由 message_added 事件最终确定（含 thinking 内容块），
+          // 此处 loadSession 会用服务端反序列化版本覆盖，导致 thinking 丢失。
           fetch(`/api/agent/${encodeURIComponent(sessionIdRef.current)}`)
             .then((r) => r.json())
             .then((d: { state?: { contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string } }) => {
@@ -346,7 +348,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       case "turn_end":
         setIsCompacting(false);
-        if (sessionIdRef.current) loadSession(sessionIdRef.current);
+        // turn_end 不替换 messages——消息流由 message_added 统一收敛。
+        // 只刷新树结构（sidebar 需要感知新 entry）。
+        if (sessionIdRef.current) {
+          fetch(`/api/sessions/${encodeURIComponent(sessionIdRef.current)}`)
+            .then((r) => r.json())
+            .then((d: { tree?: SessionTreeNode[]; leafId?: string | null }) => {
+              if (d.tree) {
+                setData((prev) => prev ? { ...prev, tree: d.tree!, leafId: d.leafId ?? prev.leafId } : prev);
+              }
+            })
+            .catch(() => {});
+        }
         break;
       case "error":
         setAgentRunning(false);
