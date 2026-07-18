@@ -12,6 +12,7 @@
     "e2e": "tsx scripts/e2e-with-server.ts",
     "test:visual": "playwright test",
     "db:migrate": "tsx scripts/db-migrate.ts",
+    "seed:users": "tsx scripts/seed-users.ts",
     "infra:up": "docker compose -f docker-compose.dev.yml up -d --wait",
     "infra:down": "docker compose -f docker-compose.dev.yml down"
   },
