@@ -1,15 +1,25 @@
 import { NextResponse } from "next/server";
 import { getPlanStateRepo } from "@/lib/storage";
+import { canAccessOwner } from "@/lib/session-ownership";
+import { resolveUserContext } from "@/lib/user-context";
 
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   const { id } = await ctx.params;
   try {
+    const context = resolveUserContext(req);
+    if (!context.userId) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+
     const state = await getPlanStateRepo().load(id);
     if (!state) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    if (!canAccessOwner(state.userId, context.userId, context.mode)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
     return NextResponse.json(state);
   } catch (e) {

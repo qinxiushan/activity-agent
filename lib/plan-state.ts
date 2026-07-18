@@ -65,6 +65,7 @@ export interface ProposedPlan {
 
 export interface PlanState {
   sessionId: string;
+  userId?: string;
   phase: PlanPhase;
   turnCount: number;
   clarificationCount: number;
@@ -132,9 +133,10 @@ export const MAX_CLARIFICATIONS = 1;
 
 export class PlanStateManager {
   private readonly state: PlanState;
-  constructor(sessionId: string, _storageDir?: string) {
+  constructor(sessionId: string, _storageDir?: string, userId?: string) {
     this.state = {
       sessionId,
+      userId,
       phase: "idle",
       turnCount: 0,
       clarificationCount: 0,
@@ -151,6 +153,10 @@ export class PlanStateManager {
 
   get currentPhase(): PlanPhase {
     return this.state.phase;
+  }
+
+  get userId(): string | undefined {
+    return this.state.userId;
   }
 
   get intent(): CapturedIntent {
@@ -212,6 +218,12 @@ export class PlanStateManager {
     this.state.turnCount++;
   }
 
+  async setUserId(userId: string): Promise<void> {
+    if (!userId || this.state.userId === userId) return;
+    this.state.userId = userId;
+    await this.persist();
+  }
+
   reset(): void {
     this.state.phase = "idle";
     this.state.turnCount = 0;
@@ -230,10 +242,13 @@ export class PlanStateManager {
     }
   }
 
-  static async load(sessionId: string, _storageDir?: string): Promise<PlanStateManager> {
-    const mgr = new PlanStateManager(sessionId);
+  static async load(sessionId: string, _storageDir?: string, userId?: string): Promise<PlanStateManager> {
+    const mgr = new PlanStateManager(sessionId, undefined, userId);
     const data = await getPlanStateRepo().load(sessionId);
     if (data) Object.assign(mgr.state, data);
+    if (!mgr.state.userId && userId) {
+      mgr.state.userId = userId;
+    }
     return mgr;
   }
 }
@@ -284,5 +299,4 @@ export function classifyUserConfirmation(message: string): "confirm" | "reject" 
   if (/(修改|换一下|调整|改|重新|换成|不要这个|不要那个|再加|去掉|增加|减少|把.+换|换个)/i.test(m)) return "modify";
   return "ambiguous";
 }
-
 

@@ -77,8 +77,8 @@ export class AgentSessionWrapper {
   public readonly planState: PlanStateManager;
   private eventAdapter: EventAdapter;
 
-  constructor(public readonly inner: AgentSessionLike, planState?: PlanStateManager) {
-    this.planState = planState ?? new PlanStateManager(inner.sessionId);
+  constructor(public readonly inner: AgentSessionLike, planState?: PlanStateManager, userId?: string) {
+    this.planState = planState ?? new PlanStateManager(inner.sessionId, undefined, userId);
     this.eventAdapter = new EventAdapter(inner.sessionId, this.planState);
   }
 
@@ -402,7 +402,8 @@ export function getRpcSession(sessionId: string): AgentSessionWrapper | undefine
 export async function startRpcSession(
   sessionId: string,
   sessionFile: string,
-  cwd: string
+  cwd: string,
+  userId?: string,
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
   const registry = getRegistry();
   const locks = getLocks();
@@ -437,9 +438,12 @@ export async function startRpcSession(
     const realSessionFile = inner.sessionFile as string | undefined;
     if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile);
 
-    const planState = await PlanStateManager.load(realSessionId);
+    const planState = await PlanStateManager.load(realSessionId, undefined, userId);
+    if (userId && planState.userId !== userId) {
+      await planState.setUserId(userId);
+    }
 
-    const wrapper = new AgentSessionWrapper(inner, planState);
+    const wrapper = new AgentSessionWrapper(inner, planState, userId);
     wrapper.start();
 
     wrapper.onDestroy(() => {

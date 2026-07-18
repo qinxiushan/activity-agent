@@ -16,9 +16,10 @@ export function createPgPlanStateRepo(): PlanStateRepo {
   return {
     async save(state: PlanState): Promise<void> {
       await getPool().query(
-        `INSERT INTO plan_states (session_id, phase, turn_count, clarification_count, intent, plan, history, last_transition_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        `INSERT INTO plan_states (session_id, user_id, phase, turn_count, clarification_count, intent, plan, history, last_transition_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          ON CONFLICT (session_id) DO UPDATE SET
+           user_id=EXCLUDED.user_id,
            phase=EXCLUDED.phase,
            turn_count=EXCLUDED.turn_count,
            clarification_count=EXCLUDED.clarification_count,
@@ -29,6 +30,7 @@ export function createPgPlanStateRepo(): PlanStateRepo {
            updated_at=now()`,
         [
           state.sessionId,
+          state.userId ?? null,
           state.phase,
           state.turnCount,
           state.clarificationCount,
@@ -81,6 +83,7 @@ interface PlanStateRow {
 function rowToPlanState(row: PlanStateRow): PlanState {
   return {
     sessionId: row.session_id,
+    userId: row.user_id ?? undefined,
     phase: row.phase as PlanState["phase"],
     turnCount: Number(row.turn_count),
     clarificationCount: Number(row.clarification_count),

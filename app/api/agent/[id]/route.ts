@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
 import { startRpcSession, getRpcSession } from "@/lib/rpc-manager";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { getCurrentUserIdFromRequest } from "@/lib/user-context";
+import { resolveUserContext } from "@/lib/user-context";
 import {
   buildRateLimitHeaders,
   checkMessageRateLimit,
   formatRateLimitError,
   isMessageRateLimitedCommand,
 } from "@/lib/rate-limiter";
+import { canAccessSession } from "@/lib/session-ownership";
 
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
@@ -19,7 +20,11 @@ export async function POST(
 
   try {
     const body = await req.json() as { type: string; [key: string]: unknown };
-    const userId = getCurrentUserIdFromRequest(req);
+    const context = resolveUserContext(req);
+    if (!context.userId) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    const userId = context.userId;
 
     if (isMessageRateLimitedCommand(body)) {
       const verdict = await checkMessageRateLimit(userId);
@@ -42,10 +47,13 @@ export async function POST(
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
+    if (!(await canAccessSession(id, userId, context.mode))) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
 
     const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
 
-    const { session } = await startRpcSession(id, filePath, cwd);
+    const { session } = await startRpcSession(id, filePath, cwd, userId);
     const result = await session.send(body);
 
     return NextResponse.json({ success: true, data: result });
@@ -56,12 +64,20 @@ export async function POST(
 
 // GET /api/agent/[id] - Get current agent state
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
 
   try {
+    const context = resolveUserContext(req);
+    if (!context.userId) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    if (!(await canAccessSession(id, context.userId, context.mode))) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+
     const session = getRpcSession(id);
     if (!session || !session.isAlive()) {
       return NextResponse.json({ running: false });

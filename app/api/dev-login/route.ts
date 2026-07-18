@@ -10,6 +10,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { isAuthRequired } from "@/lib/auth-mode";
 
 export const dynamic = "force-dynamic";
 
@@ -32,10 +33,16 @@ function buildClearCookie(): string {
 }
 
 export async function GET(req: Request): Promise<NextResponse> {
+  if (isAuthRequired()) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
   return NextResponse.json({ userId: readCookie(req) });
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
+  if (isAuthRequired()) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
   let body: { userId?: string };
   try {
     body = (await req.json()) as { userId?: string };
@@ -51,6 +58,9 @@ export async function POST(req: Request): Promise<NextResponse> {
 }
 
 export async function DELETE(req: Request): Promise<NextResponse> {
+  if (isAuthRequired()) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
   const previous = readCookie(req);
   const res = NextResponse.json({ userId: null, ok: true, previous });
   res.headers.append("Set-Cookie", buildClearCookie());

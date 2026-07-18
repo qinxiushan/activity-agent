@@ -5,9 +5,9 @@
  * PUT    /api/user-preferences       — manually edit defaults (partial)
  * POST   /api/user-preferences       — action=refresh → re-derive from history
  *
- * v3: X-User-Id header > pi_user cookie > os.userInfo().username > 'default'.
+ * disabled/optional: signed auth > X-User-Id > pi_user > os.userInfo().username.
+ * required: only signed auth is accepted.
  * ?userId= or body.userId still override for explicit per-request testing.
- * Set/clear the cookie via /api/dev-login.
  */
 
 import { NextResponse } from "next/server";
@@ -15,26 +15,34 @@ import {
   getUserPreferencesStore,
   type UserPreferencesDefaults,
 } from "@/lib/user-preferences";
-import { getCurrentUserIdFromRequest } from "@/lib/user-context";
+import { resolveUserContext } from "@/lib/user-context";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request): Promise<NextResponse> {
   const url = new URL(req.url);
-  const userId = url.searchParams.get("userId") ?? getCurrentUserIdFromRequest(req);
+  const context = resolveUserContext(req);
+  const userId = url.searchParams.get("userId") ?? context.userId;
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   const store = getUserPreferencesStore(userId);
   const prefs = await store.load();
   return NextResponse.json({ preferences: prefs });
 }
 
 export async function PUT(req: Request): Promise<NextResponse> {
+  const context = resolveUserContext(req);
   let body: { userId?: string; defaults?: Partial<UserPreferencesDefaults> };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
-  const userId = body.userId ?? getCurrentUserIdFromRequest(req);
+  const userId = body.userId ?? context.userId;
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   if (!body.defaults || typeof body.defaults !== "object") {
     return NextResponse.json({ error: "missing_defaults" }, { status: 400 });
   }
@@ -44,13 +52,17 @@ export async function PUT(req: Request): Promise<NextResponse> {
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
+  const context = resolveUserContext(req);
   let body: { userId?: string; action?: string };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
-  const userId = body.userId ?? getCurrentUserIdFromRequest(req);
+  const userId = body.userId ?? context.userId;
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   const action = body.action;
   const store = getUserPreferencesStore(userId);
 

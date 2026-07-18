@@ -1,6 +1,8 @@
 import { resolveSessionPath } from "@/lib/session-reader";
 import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { resolveUserContext } from "@/lib/user-context";
+import { canAccessSession } from "@/lib/session-ownership";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +12,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const context = resolveUserContext(req);
+  if (!context.userId) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  if (!(await canAccessSession(id, context.userId, context.mode))) {
+    return new Response("Forbidden", { status: 403 });
+  }
+  const userId = context.userId;
 
   // Fast path: already-running session
   let session = getRpcSession(id);
@@ -20,7 +30,7 @@ export async function GET(
     }
     const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
     try {
-      ({ session } = await startRpcSession(id, filePath, cwd));
+      ({ session } = await startRpcSession(id, filePath, cwd, userId));
     } catch (error) {
       return new Response(`Failed to start agent: ${error}`, { status: 500 });
     }

@@ -9,6 +9,8 @@ import {
   listAllSessions,
 } from "@/lib/session-reader";
 import { getRpcSession } from "@/lib/rpc-manager";
+import { canAccessSession } from "@/lib/session-ownership";
+import { resolveUserContext } from "@/lib/user-context";
 
 export async function GET(
   req: Request,
@@ -16,16 +18,23 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
+    const userContext = resolveUserContext(req);
+    if (!userContext.userId) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+    if (!(await canAccessSession(id, userContext.userId, userContext.mode))) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
 
     const sm = SessionManager.open(filePath);
     const entries = sm.getEntries() as never;
     const tree = sm.getTree();
     const leafId = sm.getLeafId();
-    const context = buildSessionContext(entries, leafId);
+    const sessionContext = buildSessionContext(entries, leafId);
 
     const header = sm.getHeader();
     let modified = header?.timestamp ?? new Date().toISOString();
@@ -39,10 +48,10 @@ export async function GET(
       name: sm.getSessionName(),
       created: header.timestamp,
       modified,
-      messageCount: context.messages.length,
-      firstMessage: context.messages.find((m) => m.role === "user")
+      messageCount: sessionContext.messages.length,
+      firstMessage: sessionContext.messages.find((m) => m.role === "user")
         ? (() => {
-            const msg = context.messages.find((m) => m.role === "user")!;
+            const msg = sessionContext.messages.find((m) => m.role === "user")!;
             const c = (msg as { content: unknown }).content;
             return typeof c === "string" ? c : (Array.isArray(c) ? (c.find((b: { type: string }) => b.type === "text") as { text: string } | undefined)?.text ?? "" : "") || "(no messages)";
           })()
@@ -68,7 +77,7 @@ export async function GET(
       info,
       tree,
       leafId,
-      context,
+      context: sessionContext,
       ...(agentState !== undefined ? { agentState } : {}),
     });
   } catch (error) {
@@ -83,6 +92,10 @@ export async function PATCH(
 ) {
   const { id } = await params;
   try {
+    const userContext = resolveUserContext(req);
+    if (!userContext.userId) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
     const { name } = await req.json() as { name?: string };
     if (typeof name !== "string") {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
@@ -90,6 +103,9 @@ export async function PATCH(
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+    if (!(await canAccessSession(id, userContext.userId, userContext.mode))) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
     const sm = SessionManager.open(filePath);
     sm.appendSessionInfo(name.trim());
@@ -101,14 +117,21 @@ export async function PATCH(
 
 // DELETE /api/sessions/[id]
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   try {
+    const userContext = resolveUserContext(req);
+    if (!userContext.userId) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+    if (!(await canAccessSession(id, userContext.userId, userContext.mode))) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
 
     // Read header before deleting to get parentSession path

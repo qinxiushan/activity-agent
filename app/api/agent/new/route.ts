@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { existsSync } from "fs";
 import { startRpcSession } from "@/lib/rpc-manager";
-import { getCurrentUserIdFromRequest } from "@/lib/user-context";
+import { resolveUserContext } from "@/lib/user-context";
 import {
   buildRateLimitHeaders,
   checkMessageRateLimit,
@@ -16,7 +16,11 @@ export async function POST(req: Request) {
   try {
     const body = await req.json() as { cwd?: string; [key: string]: unknown };
     const { cwd, ...command } = body;
-    const userId = getCurrentUserIdFromRequest(req);
+    const context = resolveUserContext(req);
+    if (!context.userId) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    const userId = context.userId;
 
     if (!cwd || typeof cwd !== "string") {
       return NextResponse.json({ error: "cwd is required" }, { status: 400 });
@@ -38,7 +42,7 @@ export async function POST(req: Request) {
     const { provider, modelId, thinkingLevel, ...promptCommand } = command as { provider?: string; modelId?: string; thinkingLevel?: string; [key: string]: unknown };
 
     const tempKey = `__new__${Date.now()}`;
-    const { session, realSessionId } = await startRpcSession(tempKey, "", cwd);
+    const { session, realSessionId } = await startRpcSession(tempKey, "", cwd, userId);
 
     // Keep the files-route allowed-roots cache (see app/api/files/[...path]/route.ts)
     // in sync so the new cwd is immediately readable via /api/files. Without this,

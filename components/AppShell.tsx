@@ -94,17 +94,45 @@ export function AppShell() {
 
   const activity = useActivitySession();
 
-  const [identity, setIdentity] = useState<{ userId: string; isDev: boolean } | null>(null);
+  const [identity, setIdentity] = useState<{
+    userId: string;
+    username: string | null;
+    authed: boolean;
+    isDev: boolean;
+    mode: "disabled" | "optional" | "required";
+  } | null>(null);
   useEffect(() => {
     fetch("/api/whoami")
       .then((r) => r.ok ? r.json() : null)
-      .then((d: { userId?: string; isDev?: boolean } | null) => {
+      .then((d: {
+        userId?: string | null;
+        username?: string | null;
+        authed?: boolean;
+        isDev?: boolean;
+        mode?: "disabled" | "optional" | "required";
+      } | null) => {
         if (d && typeof d.userId === "string") {
-          setIdentity({ userId: d.userId, isDev: d.isDev === true });
+          setIdentity({
+            userId: d.userId,
+            username: d.username ?? null,
+            authed: d.authed === true,
+            isDev: d.isDev === true,
+            mode: d.mode ?? "optional",
+          });
         }
       })
       .catch(() => {});
   }, []);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // ignore client-side logout errors and let the redirect refresh state
+    }
+    router.replace("/login");
+    router.refresh();
+  }, [router]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -565,7 +593,13 @@ export function AppShell() {
           })()}
           {identity && (
             <div
-              title={identity.isDev ? `dev mode (cookie): ${identity.userId}` : `user: ${identity.userId}`}
+              title={
+                identity.authed
+                  ? `signed session: ${identity.username ?? identity.userId}`
+                  : identity.isDev
+                    ? `dev mode (cookie): ${identity.userId}`
+                    : `user: ${identity.userId}`
+              }
               style={{
                 position: "absolute",
                 right: rightPanelOpen ? 12 : 48,
@@ -577,9 +611,31 @@ export function AppShell() {
             >
               <span style={{
                 width: 5, height: 5, borderRadius: "50%",
-                background: identity.isDev ? "#ef4444" : "var(--accent)",
+                background: identity.authed ? "#10b981" : identity.isDev ? "#ef4444" : "var(--accent)",
               }} />
-              {identity.userId}
+              {identity.authed ? (identity.username ?? identity.userId) : identity.userId}
+              {!identity.authed && identity.mode !== "required" && (
+                <span style={{ opacity: 0.75 }}>
+                  {identity.isDev ? "" : "本机"}
+                </span>
+              )}
+              {identity.authed && (
+                <button
+                  onClick={handleLogout}
+                  style={{
+                    height: 22,
+                    padding: "0 8px",
+                    borderRadius: 999,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-panel)",
+                    color: "var(--text-muted)",
+                    cursor: "pointer",
+                    fontSize: 10,
+                  }}
+                >
+                  退出
+                </button>
+              )}
               {identity.isDev && (
                 <span style={{
                   fontSize: 9, fontWeight: 600,
