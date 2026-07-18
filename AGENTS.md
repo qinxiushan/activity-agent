@@ -313,6 +313,37 @@ Exit codes:
   outside `docs/` and be committed normally.
 - If the above rule changes in the future, update `.gitignore` accordingly.
 
+## Debugging Rules — 模型行为异常时先查什么
+
+模型回复异常（thinking 不输出、工具不加载、system prompt 不生效、token 用量异常）时，
+**第一步永远是检查 pi SDK 的三份配置文件**，不要直接跳进代码逻辑排查。
+
+### 必须检查的 3 个文件
+
+| 文件 | 查什么 | 典型问题 |
+|------|--------|---------|
+| `~/.pi/agent/settings.json` | `defaultProvider` / `defaultModel` / `defaultThinkingLevel` | thinking 被关掉 (`"off"`)、模型指向错误的 provider |
+| `~/.pi/agent/models.json` | 自定义 provider 的 model 列表和配置 | 模型不可用、参数不对 |
+| `~/.pi/agent/auth.json` | API key 是否正确配置 | 401/403、无权限调用 |
+
+> 这三个文件是 pi SDK 的"全局开关"——每行都可能直接影响所有 session 的行为。
+> 详细说明见 [`docs/MODEL_CONFIG.md`](docs/MODEL_CONFIG.md)。
+
+### 读 JSONL 要读全
+
+分析 session 行为时，不要只看 `message` entry。必须检查**上下文 entry**：
+- `thinking_level_change` → 模型是否会产出 thinking
+- `model_change` → 当前用的什么模型（是否支持 thinking）
+- `compaction` → 上下文是否被压缩（可能丢失设定）
+
+JSONL 是 append-only 的完整事件日志——前面的 entry 决定了后面消息的行为。
+
+### 兜底值规则：默认值应该是"启用"而非"禁用"
+
+任何枚举/开关类字段的 `??` fallback 都必须是"开启"或"自动"，绝不能是"关闭"。
+例：`thinkingLevel ?? "off"`（❌） → `thinkingLevel ?? "auto"`（✅）。
+不清楚用什么值时，给用户最好的体验（打开），而不是最差的体验（关闭）。
+
 ## Changelog Convention
 
 Every bug fix, improvement, refactor, security patch, or performance optimization
