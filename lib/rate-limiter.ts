@@ -5,7 +5,7 @@ import { metrics } from "./metrics-registry";
 const WINDOW_MS = 60_000;
 const REDIS_WARN_INTERVAL_MS = 30_000;
 
-type RateLimitAction = "message";
+type RateLimitAction = "message" | `tool:${string}`;
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -31,6 +31,12 @@ function nowMs(): number {
 function getLimitPerMinute(): number {
   const raw = Number(process.env.RATE_LIMIT_MSGS_PER_MIN ?? "20");
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 20;
+}
+
+function getToolLimitPerMinute(toolName: string): number | null {
+  if (toolName === "reservation_exec") return 5;
+  if (toolName === "search_activities" || toolName === "search_restaurants") return 30;
+  return null;
 }
 
 export function isRateLimitEnabled(): boolean {
@@ -156,6 +162,35 @@ export async function checkMessageRateLimit(userId: string): Promise<RateLimitRe
     logRedisFallbackOnce(err);
     const result = runMemorySlidingWindow(key, limit, now);
     if (!result.allowed) recordRateLimitHit("message");
+    return result;
+  }
+}
+
+export async function checkToolRateLimit(userId: string, toolName: string): Promise<RateLimitResult | null> {
+  const limit = getToolLimitPerMinute(toolName);
+  if (!limit) return null;
+  if (!isRateLimitEnabled()) {
+    return {
+      allowed: true,
+      retryAfterMs: 0,
+      remaining: limit,
+      limit,
+      source: "disabled",
+    };
+  }
+
+  const now = nowMs();
+  const key = `rate_limit:user:${userId}:tool:${toolName}`;
+  const action = `tool:${toolName}` as RateLimitAction;
+
+  try {
+    const result = await runRedisSlidingWindow(key, limit, now);
+    if (!result.allowed) recordRateLimitHit(action);
+    return result;
+  } catch (err) {
+    logRedisFallbackOnce(err);
+    const result = runMemorySlidingWindow(key, limit, now);
+    if (!result.allowed) recordRateLimitHit(action);
     return result;
   }
 }
