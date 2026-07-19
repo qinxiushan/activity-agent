@@ -253,30 +253,33 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const restoredRef = useRef(false);
 
   useEffect(() => {
+    restoredRef.current = false;
+  }, [initialSessionId]);
+
+  useEffect(() => {
     onCwdChange?.(selectedCwd);
   }, [selectedCwd, onCwdChange]);
 
-  // Auto-select cwd and restore session from URL on first load
+  // Restore session from URL whenever the ?session= param changes.
   useEffect(() => {
-    if (allSessions.length === 0) return;
-
-    if (selectedCwd === null) {
-      // If restoring a session, set cwd to match that session
-      if (initialSessionId && !restoredRef.current) {
-        restoredRef.current = true;
-        const target = allSessions.find((s) => s.id === initialSessionId);
-        if (target) {
-          setSelectedCwd(target.cwd);
-          onSelectSession(target, true);
-          return;
-        }
-        // Session not found — notify parent so it can show the placeholder
-        onInitialRestoreDone?.();
-      }
-      const cwds = getRecentCwds(allSessions);
-      if (cwds.length > 0) setSelectedCwd(cwds[0]);
+    if (!initialSessionId || restoredRef.current || allSessions.length === 0) return;
+    restoredRef.current = true;
+    const target = allSessions.find((s) => s.id === initialSessionId);
+    if (target) {
+      setSelectedCwd(target.cwd);
+      onSelectSession(target, true);
+      return;
     }
-  }, [allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone]);
+    onInitialRestoreDone?.();
+  }, [allSessions, initialSessionId, onSelectSession, onInitialRestoreDone]);
+
+  // Auto-select cwd on first load when not restoring from URL.
+  useEffect(() => {
+    if (selectedCwd !== null || allSessions.length === 0) return;
+    if (initialSessionId && !restoredRef.current) return;
+    const cwds = getRecentCwds(allSessions);
+    if (cwds.length > 0) setSelectedCwd(cwds[0]);
+  }, [allSessions, selectedCwd, initialSessionId]);
 
   const commitCustomPath = useCallback(() => {
     const path = customPathValue.trim();
