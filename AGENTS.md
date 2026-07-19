@@ -6,6 +6,10 @@
 npm run dev                  # port 30142
 ```
 
+```bash
+docker compose up -d --build # app + postgres + redis
+```
+
 | Check                                             | Command                            |
 | ------------------------------------------------- | ---------------------------------- |
 | Typecheck                                         | `node_modules/.bin/tsc --noEmit` |
@@ -13,6 +17,24 @@ npm run dev                  # port 30142
 | Real LLM e2e — one-shot (auto-starts dev server) | `npm run e2e`                    |
 | Real LLM e2e — manual (server must be running)   | `npm run e2e:real`               |
 | Playwright visual                                 | `npm run test:visual`            |
+
+**Docker quick start (`AUTH_MODE=required`)**
+
+1. `docker compose up -d --build`
+2. 把宿主机 pi 凭证复制进 app 容器绑定的 named volume：
+   `docker cp ~/.pi/agent/auth.json $(docker compose ps -q app):/home/nextjs/.pi/agent/auth.json`
+3. 如需默认模型/自定义 provider，再复制：
+   `docker cp ~/.pi/agent/settings.json $(docker compose ps -q app):/home/nextjs/.pi/agent/settings.json`
+   `docker cp ~/.pi/agent/models.json $(docker compose ps -q app):/home/nextjs/.pi/agent/models.json`
+4. 浏览器打开 `http://localhost:30142/`，应先跳转 `/login`
+
+容器模式下，pi SDK 仍然读取同一套 3 文件：
+
+- `/home/nextjs/.pi/agent/settings.json`
+- `/home/nextjs/.pi/agent/auth.json`
+- `/home/nextjs/.pi/agent/models.json`
+
+原则不变：默认模型改 `settings.json`，内置 provider key 改 `auth.json`，自定义 provider 改 `models.json`。
 
 ## CI (GitHub Actions)
 
@@ -123,6 +145,8 @@ Browser                Next.js Server              AgentSession (in-process)
 
 ```
 app/api/
+  auth/login/route.ts            POST username/password → signed session cookie
+  auth/logout/route.ts           POST clear signed session cookie
   sessions/route.ts               GET  list all sessions
   sessions/[id]/route.ts          GET/PATCH/DELETE session
   sessions/[id]/context/route.ts  GET ?leafId= — context for a specific leaf
@@ -138,15 +162,20 @@ app/api/
 
 app/
   layout.tsx            Root layout, dark/light theme bootstrap
+  login/page.tsx        Required-auth login page
   page.tsx              Main pi-web shell (SessionSidebar + ChatWindow + FileViewer)
   activity/page.tsx     Activity-specific UI: SOP-v2 phase progress + tool timeline + plan + booking
   globals.css           CSS variables (light + dark), shared styles
 
 lib/
+  auth-constants.ts        auth cookie name shared by node + edge runtime
+  auth-mode.ts             disabled / optional / required auth mode parser
+  auth-session.ts          signed auth token + password verify + user lookup
   rpc-manager.ts           AgentSessionWrapper + startRpcSession
                            + advancePlanPhase (idle/completed/cancelled → intent_capture;
                                                 clarifying → planning;
                                                 plan_confirm → executing/planning/intent_capture)
+                           + shutdownRpcSessions() for T4 graceful stop
   plan-state.ts            8-phase state machine, tool-phase rules,
                            getMissingCriticalFields, MAX_CLARIFICATIONS=1
   poi-database.ts          34 POIs (22 activities + 12 restaurants) across 北京/上海/深圳
@@ -165,6 +194,7 @@ lib/
                            os.userInfo().username > DEFAULT_USER_ID;
                            getCurrentUserId() for tools (no req context),
                            getCurrentUserIdFromRequest(req) for API routes
+  session-ownership.ts     session / plan-state owner checks for required auth
   session-reader.ts        parse .jsonl; getModelList/getDefaultModel
   types.ts                 shared TypeScript types
   normalize.ts             normalizeToolCalls()
@@ -193,8 +223,17 @@ hooks/
   useActivitySession.ts    Minimal SSE + plan-state polling hook (separate from useAgentSession)
 
 scripts/
-  p0-smoke-test.ts         Unit + integration tests (126 assertions, no API)
+  p0-smoke-test.ts         Unit + integration tests (242 assertions, no API)
   e2e-real-llm-test.ts     Real LLM end-to-end test (requires API key)
+  seed-users.ts            Idempotent seed for alice/bob test accounts
+
+docker/
+  entrypoint.sh            Run migrations + seed users, then start standalone app
+
+Repo root:
+  Dockerfile               multi-stage standalone build for app container
+  docker-compose.yml       full stack: app + postgres + redis
+  docker-compose.dev.yml   infra-only dev stack (postgres + redis)
 ```
 
 ## Activity UI (`/activity` page)

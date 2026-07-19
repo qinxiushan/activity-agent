@@ -1,0 +1,63 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 30142
+      STORAGE_BACKEND: postgres
+      DATABASE_URL: postgres://activity:activity_dev@postgres:5432/activity_agent
+      REDIS_URL: redis://redis:6379
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_MSGS_PER_MIN: 20
+      AUTH_MODE: required
+      AUTH_SECRET: ${AUTH_SECRET:-compose-dev-secret-change-me}
+    ports:
+      - "30142:30142"
+    volumes:
+      - pi-agent-home:/home/nextjs/.pi/agent
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:30142/api/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      start_period: 20s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: activity
+      POSTGRES_PASSWORD: activity_dev
+      POSTGRES_DB: activity_agent
+    ports:
+      - "55432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U activity -d activity_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "56379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  pi-agent-home:

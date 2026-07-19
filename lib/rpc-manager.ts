@@ -15,6 +15,8 @@ import { EventAdapter } from "./event-adapter";
 import type { StandardEvent } from "./event-types";
 import { metrics } from "./metrics-registry";
 import phaseGuardExtension from "./extensions/phase-guard";
+import { closePool } from "./db";
+import { closeRedis } from "./redis";
 
 // ============================================================================
 // 资源加载器：注入活动规划器系统提示词
@@ -372,15 +374,14 @@ export class AgentSessionWrapper {
 declare global {
   var __piSessions: Map<string, AgentSessionWrapper> | undefined;
   var __piStartLocks: Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string }>> | undefined;
+  var __piShutdownRegistered: boolean | undefined;
+  var __piShutdownInFlight: Promise<void> | undefined;
 }
 
 function getRegistry(): Map<string, AgentSessionWrapper> {
   if (!globalThis.__piSessions) {
     globalThis.__piSessions = new Map();
-    const cleanup = () => globalThis.__piSessions?.forEach((s) => s.destroy());
-    process.once("exit", cleanup);
-    process.once("SIGINT", cleanup);
-    process.once("SIGTERM", cleanup);
+    registerShutdownHandlers();
   }
   return globalThis.__piSessions;
 }
@@ -392,6 +393,56 @@ function getLocks(): Map<string, Promise<{ session: AgentSessionWrapper; realSes
 
 export function getRpcSession(sessionId: string): AgentSessionWrapper | undefined {
   return getRegistry().get(sessionId);
+}
+
+function registerShutdownHandlers(): void {
+  if (globalThis.__piShutdownRegistered) return;
+  globalThis.__piShutdownRegistered = true;
+
+  process.once("exit", () => {
+    globalThis.__piSessions?.forEach((s) => s.destroy());
+  });
+
+  const asyncCleanup = (signal: "SIGINT" | "SIGTERM") => {
+    void shutdownRpcSessions(signal).finally(() => {
+      process.exit(0);
+    });
+  };
+
+  process.once("SIGINT", () => asyncCleanup("SIGINT"));
+  process.once("SIGTERM", () => asyncCleanup("SIGTERM"));
+}
+
+export async function shutdownRpcSessions(reason = "shutdown"): Promise<void> {
+  if (globalThis.__piShutdownInFlight) return globalThis.__piShutdownInFlight;
+
+  const task = (async () => {
+    const registry = globalThis.__piSessions;
+    const sessions = registry ? [...registry.values()] : [];
+    console.log(`[rpc-manager] shutdown start (${reason}) — sessions=${sessions.length}`);
+
+    for (const session of sessions) {
+      try {
+        session.destroy();
+      } catch (error) {
+        console.error(
+          `[rpc-manager] destroy failed for ${session.sessionId}:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+
+    await closePool();
+    console.log("[rpc-manager] postgres pool closed");
+
+    await closeRedis();
+    console.log("[rpc-manager] redis client closed");
+  })().finally(() => {
+    globalThis.__piShutdownInFlight = undefined;
+  });
+
+  globalThis.__piShutdownInFlight = task;
+  return task;
 }
 
 /**
