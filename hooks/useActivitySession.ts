@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { StandardEvent } from "@/lib/event-types";
 import { AgentApiError, extractApiError } from "@/lib/agent-client";
+import { restoreActivityToolCallsFromMessages } from "@/lib/activity-tool-history";
+import type { AgentMessage } from "@/lib/types";
 
 export interface ActivityToolCall {
   id: string;
@@ -35,6 +37,12 @@ export interface ActivityMessage {
   content: string;
   timestamp: number;
   toolNames?: string[];
+}
+
+interface SessionContextResponse {
+  context?: {
+    messages?: AgentMessage[];
+  };
 }
 
 export interface ActivityState {
@@ -359,6 +367,23 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
       messages: prev.messages,
       toolCalls: cached.length > 0 ? cached : prev.toolCalls,
     }));
+    if (cached.length === 0) {
+      void fetch(`${serverBase}/api/sessions/${encodeURIComponent(sid)}`, { cache: "no-store" })
+        .then(async (res) => {
+          if (!res.ok) return null;
+          return await res.json() as SessionContextResponse;
+        })
+        .then((body) => {
+          if (!body?.context?.messages || sessionIdRef.current !== sid) return;
+          const restored = restoreActivityToolCallsFromMessages(body.context.messages);
+          toolCallsBySession.current.set(sid, restored);
+          setState((prev) => {
+            if (sessionIdRef.current !== sid) return prev;
+            return { ...prev, toolCalls: restored };
+          });
+        })
+        .catch(() => {});
+    }
     connectEvents(sid);
     startPlanPoll(sid);
   }, [connectEvents, startPlanPoll]);

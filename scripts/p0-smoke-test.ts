@@ -834,6 +834,58 @@ async function main() {
   ]);
   log("extractTextFromContent joins text blocks", extracted === "hello\nworld");
 
+  section("🕘 Activity Panel: historical tool-call restore");
+  const { restoreActivityToolCallsFromMessages } = await import("../lib/activity-tool-history");
+  const restoredToolCalls = restoreActivityToolCallsFromMessages([
+    {
+      role: "assistant",
+      model: "deepseek-v4-flash",
+      provider: "deepseek",
+      timestamp: 1000,
+      content: [
+        {
+          type: "toolCall",
+          toolCallId: "call_reserve",
+          toolName: "reservation_exec",
+          input: {
+            restaurantId: "bj-r-003",
+            restaurantName: "鼎泰丰（侨福芳草地店）",
+            date: "2026-07-25",
+            time: "17:00",
+            partySize: 2,
+          },
+        },
+      ],
+    },
+    {
+      role: "toolResult",
+      toolCallId: "call_reserve",
+      toolName: "reservation_exec",
+      timestamp: 1200,
+      isError: false,
+      content: [
+        {
+          type: "text",
+          text: "{\"orderId\":\"ord_123\",\"restaurantName\":\"鼎泰丰（侨福芳草地店）\",\"date\":\"2026-07-25\",\"time\":\"17:00\",\"partySize\":2,\"confirmationCode\":\"ABCD12\",\"status\":\"confirmed\"}",
+        },
+      ],
+      details: {
+        orderId: "ord_123",
+        restaurantName: "鼎泰丰（侨福芳草地店）",
+        date: "2026-07-25",
+        time: "17:00",
+        partySize: 2,
+        confirmationCode: "ABCD12",
+        status: "confirmed",
+      },
+    },
+  ]);
+  log("historical restore: rebuilds one tool call", restoredToolCalls.length === 1);
+  log("historical restore: keeps reservation_exec tool name", restoredToolCalls[0]?.name === "reservation_exec");
+  log("historical restore: sets endedAt from toolResult timestamp", restoredToolCalls[0]?.endedAt === 1200);
+  log("historical restore: preserves booking result payload", (restoredToolCalls[0]?.result as { orderId?: string })?.orderId === "ord_123");
+  log("historical restore: marks successful toolResult as ok", restoredToolCalls[0]?.ok === true);
+
   // ─── 阶段 2 T0: 基础设施连接层（db / redis / health 扩展）─────
   section("🏗️ Stage-2 T0: Infra plumbing (db / redis / health)");
   const db = await import("../lib/db");
