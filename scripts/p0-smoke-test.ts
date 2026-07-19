@@ -45,6 +45,7 @@ import {
 } from "../lib/auth-session";
 import { canAccessOwner } from "../lib/session-ownership";
 import { resolveUserContext } from "../lib/user-context";
+import { buildAuditInsertPlaceholders } from "../lib/audit-logger";
 import { promises as afs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -967,6 +968,12 @@ async function main() {
   const auditEvents = await listAuditEvents({ limit: 10 });
   log("audit logger: flush writes at least 2 records", auditEvents.length >= 2);
   log("audit logger: newest events queryable", auditEvents.some((e) => e.eventType === "injection_detected"));
+  const auditPlaceholders = buildAuditInsertPlaceholders(2);
+  log(
+    "audit logger: postgres placeholders advance by 6 params",
+    auditPlaceholders[0] === "($1,$2,$3,$4,$5,$6)" && auditPlaceholders[1] === "($7,$8,$9,$10,$11,$12)",
+    auditPlaceholders.join(" | "),
+  );
   restoreEnv("AUDIT_DIR", prevAuditDir);
 
   const headersConfig = typeof nextConfig.headers === "function" ? await nextConfig.headers() : [];

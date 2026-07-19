@@ -83,12 +83,18 @@ function normalizeEvent(event: AuditEvent): AuditRecord {
   };
 }
 
+export function buildAuditInsertPlaceholders(batchSize: number): string[] {
+  return Array.from({ length: batchSize }, (_, index) => {
+    const base = index * 6;
+    return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6})`;
+  });
+}
+
 async function flushToPostgres(batch: AuditRecord[]): Promise<void> {
   const values: unknown[] = [];
-  const placeholders = batch.map((event, index) => {
-    const base = index * 5;
+  const placeholders = buildAuditInsertPlaceholders(batch.length);
+  batch.forEach((event) => {
     values.push(event.ts, event.userId, event.sessionId, event.eventType, event.toolName, JSON.stringify(event.detail));
-    return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6})`;
   });
   await getPool().query(
     `INSERT INTO audit_logs (ts, user_id, session_id, event_type, tool_name, detail)
