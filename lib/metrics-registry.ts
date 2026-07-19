@@ -1,11 +1,12 @@
 /**
  * Metrics Registry - Prometheus text-format metrics collector
  *
- * 自实现（不引入 prom-client），暴露 4 个核心 metric：
+ * 自实现（不引入 prom-client），暴露 5 个核心 metric：
  * 1. llm_tokens_total      counter   — 累计 token 量（按 model 区分）
  * 2. active_sessions       gauge     — 当前活跃 session 数
  * 3. tool_call_total       counter   — 工具调用次数（按 tool/status 区分）
  * 4. turn_duration_seconds histogram — turn 耗时秒数分布
+ * 5. rate_limit_hits_total counter   — 限流命中次数（按 action 区分）
  *
  * 设计原则：
  * - 无外部依赖
@@ -20,6 +21,7 @@ interface MetricDef {
   help: string;
   type: MetricType;
   labelNames: string[];
+  buckets?: number[];
 }
 
 type Labels = Record<string, string>;
@@ -43,7 +45,13 @@ class MetricsRegistry {
   }
 
   registerHistogram(name: string, help: string, labelNames: string[] = []): this {
-    this.defs.push({ name, help, type: "histogram", labelNames });
+    this.defs.push({
+      name,
+      help,
+      type: "histogram",
+      labelNames,
+      buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
+    });
     this.histograms.set(name, new Map());
     return this;
   }
@@ -85,6 +93,12 @@ class MetricsRegistry {
       for (const [key, val] of data) {
         if (def.type === "histogram") {
           const samples = val as number[];
+          const buckets = def.buckets ?? [];
+          for (const bucket of buckets) {
+            const count = samples.filter((sample) => sample <= bucket).length;
+            lines.push(`${def.name}_bucket${this.appendLeLabel(key, bucket)} ${count}`);
+          }
+          lines.push(`${def.name}_bucket${this.appendLeLabel(key, "+Inf")} ${samples.length}`);
           if (samples.length > 0) {
             const sum = samples.reduce((a, b) => a + b, 0);
             lines.push(`${def.name}_sum${key} ${sum}`);
@@ -123,6 +137,12 @@ class MetricsRegistry {
     const keys = Object.keys(labels).sort();
     if (keys.length === 0) return "";
     return `{${keys.map((k) => `${k}="${labels[k].replace(/"/g, '\\"')}"`).join(",")}}`;
+  }
+
+  private appendLeLabel(serializedLabels: string, le: number | string): string {
+    const leLabel = `le="${String(le)}"`;
+    if (!serializedLabels) return `{${leLabel}}`;
+    return serializedLabels.replace(/\}$/, `,${leLabel}}`);
   }
 }
 

@@ -77,6 +77,7 @@ export class AgentSessionWrapper {
   private onDestroyCallback: (() => void) | null = null;
   private _alive = true;
   private lastError: { code: string; message: string; retryable: boolean } | null = null;
+  private promptStartedAt: number | null = null;
   public readonly planState: PlanStateManager;
   private eventAdapter: EventAdapter;
 
@@ -121,11 +122,22 @@ export class AgentSessionWrapper {
           if (tokens > 0) {
             metrics.inc("llm_tokens_total", { model: this.inner.model?.id ?? "unknown" }, tokens);
           }
+          if (typeof event.durationSeconds === "number" && Number.isFinite(event.durationSeconds)) {
+            metrics.observe("turn_duration_seconds", event.durationSeconds);
+            this.promptStartedAt = null;
+          } else if (this.promptStartedAt !== null) {
+            metrics.observe("turn_duration_seconds", Math.max(0, (Date.now() - this.promptStartedAt) / 1000));
+            this.promptStartedAt = null;
+          }
           metrics.set("active_sessions", this.getActiveSessionCountFromRegistry());
           break;
         }
         case "tool_end":
           metrics.inc("tool_call_total", { tool: event.toolName, status: event.isError ? "error" : "ok" });
+          break;
+        case "done":
+        case "error":
+          this.promptStartedAt = null;
           break;
       }
     } catch (e) {
@@ -210,6 +222,7 @@ export class AgentSessionWrapper {
         const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         const userMessage = command.message as string;
         this.lastError = null;
+        this.promptStartedAt = Date.now();
         await this.advancePlanPhase(userMessage);
         // 在 AsyncLocalStorage 作用域内运行 prompt，确保工具 execute 读到正确的 planState
         void withPlanState(

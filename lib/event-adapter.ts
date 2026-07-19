@@ -46,6 +46,7 @@ export class EventAdapter {
   private sessionId: string;
   private planState: PlanStateManager | null;
   private turnIndex = 0;
+  private currentTurnStartedAt: number | null = null;
   private toolStartTimes = new Map<string, number>();
   private lastTurnUsage: PiUsage | null = null;
   private totalCost = 0;
@@ -80,6 +81,7 @@ export class EventAdapter {
 
       case "turn_start":
         this.turnIndex++;
+        this.currentTurnStartedAt = Date.now();
         return [{ type: "turn_start", turnIndex: this.turnIndex }];
 
       case "turn_end": {
@@ -88,10 +90,15 @@ export class EventAdapter {
         const stopReason = message?.stopReason ?? "stop";
         if (usage) this.lastTurnUsage = usage;
         if (usage?.cost?.total) this.totalCost += usage.cost.total;
+        const durationSeconds = this.currentTurnStartedAt === null
+          ? undefined
+          : Math.max(0, (Date.now() - this.currentTurnStartedAt) / 1000);
+        this.currentTurnStartedAt = null;
         return [
           {
             type: "turn_end",
             turnIndex: this.turnIndex,
+            durationSeconds,
             usage: {
               input: usage?.input ?? 0,
               output: usage?.output ?? 0,
@@ -226,6 +233,7 @@ export class EventAdapter {
 
   reset(): void {
     this.turnIndex = 0;
+    this.currentTurnStartedAt = null;
     this.toolStartTimes.clear();
     this.lastTurnUsage = null;
     this.totalCost = 0;

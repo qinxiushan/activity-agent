@@ -2,7 +2,7 @@
  * Metrics Endpoint - /api/metrics
  *
  * 用于 Prometheus 抓取，格式 text/plain; version=0.0.4。
- * 暴露 4 个核心 metric：
+ * 暴露 5 个核心 metric：
  *   # HELP llm_tokens_total Total LLM tokens consumed
  *   # TYPE llm_tokens_total counter
  *   llm_tokens_total{model="deepseek-v4-flash"} 12345
@@ -19,6 +19,10 @@
  *   # TYPE turn_duration_seconds histogram
  *   turn_duration_seconds_sum 12.345
  *   turn_duration_seconds_count 5
+ *
+ *   # HELP rate_limit_hits_total Total rate limit hits
+ *   # TYPE rate_limit_hits_total counter
+ *   rate_limit_hits_total{action="message"} 1
  */
 
 import { metrics } from "@/lib/metrics-registry";

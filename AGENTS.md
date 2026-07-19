@@ -10,6 +10,10 @@ npm run dev                  # port 30142
 docker compose up -d --build # app + postgres + redis
 ```
 
+```bash
+docker compose up -d --build # app + postgres + redis + prometheus + grafana
+```
+
 | Check                                             | Command                            |
 | ------------------------------------------------- | ---------------------------------- |
 | Typecheck                                         | `node_modules/.bin/tsc --noEmit` |
@@ -31,6 +35,22 @@ docker compose up -d --build # app + postgres + redis
    或者直接：
    `docker compose restart app`
 5. 浏览器打开 `http://localhost:30142/`，应先跳转 `/login`
+
+**重要：`docker compose build` 依赖本地最新 `.next/standalone`**
+
+- 当前 `Dockerfile` **不会**在镜像内执行 `next build`，而是直接 `COPY .next/standalone` 和 `.next/static`
+- 因此代码改动后，如果要让容器拿到最新应用代码，必须先重新生成 `.next`
+- Next 16 构建要求 **Node >= 20.9.0**；宿主机如果还是 Node 18，`npm run build` 会直接失败
+- 宿主机版本不够时，用 Node 22 容器构建：
+  `docker run --rm -v "$PWD":/work -w /work docker.m.daocloud.io/library/node:22-alpine sh -lc "npm run build"`
+- 然后再执行：
+  `DOCKER_BUILDKIT=0 docker compose up -d --build app`
+
+**监控端口**
+
+- App: `http://localhost:30142`
+- Prometheus: `http://localhost:59090`
+- Grafana: `http://localhost:53000`（默认已开启匿名只读）
 
 容器模式下，pi SDK 仍然读取同一套 3 文件：
 

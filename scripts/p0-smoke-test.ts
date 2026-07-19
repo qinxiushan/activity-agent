@@ -761,7 +761,7 @@ async function main() {
   section("🔌 P0 Stage-1: Prometheus Metrics (T4)");
   const { metrics: promMetrics } = await import("../lib/metrics-registry");
 
-  // registry 应注册 4 个 metric
+  // registry 应注册 5 个 metric
   log("metrics registry exists", typeof promMetrics.render === "function");
   const rendered = promMetrics.render();
   log("/metrics output has HELP lines", rendered.includes("# HELP"));
@@ -770,10 +770,12 @@ async function main() {
   log("HELP active_sessions present", rendered.includes("HELP active_sessions"));
   log("HELP tool_call_total present", rendered.includes("HELP tool_call_total"));
   log("HELP turn_duration_seconds present", rendered.includes("HELP turn_duration_seconds"));
+  log("HELP rate_limit_hits_total present", rendered.includes("HELP rate_limit_hits_total"));
   log("TYPE llm_tokens_total counter", rendered.includes("TYPE llm_tokens_total counter"));
   log("TYPE active_sessions gauge", rendered.includes("TYPE active_sessions gauge"));
   log("TYPE tool_call_total counter", rendered.includes("TYPE tool_call_total counter"));
   log("TYPE turn_duration_seconds histogram", rendered.includes("TYPE turn_duration_seconds histogram"));
+  log("TYPE rate_limit_hits_total counter", rendered.includes("TYPE rate_limit_hits_total counter"));
 
   // 初始值为 0
   log("initial llm_tokens_total=0", promMetrics.getCounterValue("llm_tokens_total", { model: "test" }) === 0);
@@ -788,6 +790,7 @@ async function main() {
 
   promMetrics.observe("turn_duration_seconds", 2.5);
   const rendered2 = promMetrics.render();
+  log("histogram has _bucket", rendered2.includes("turn_duration_seconds_bucket"));
   log("histogram has _sum", rendered2.includes("turn_duration_seconds_sum"));
   log("histogram has _count", rendered2.includes("turn_duration_seconds_count"));
 

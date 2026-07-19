@@ -49,6 +49,7 @@ export type StandardEvent =
   | {
       type: "turn_end";
       turnIndex: number;
+      durationSeconds?: number;
       usage: {
         input: number;
         output: number;
