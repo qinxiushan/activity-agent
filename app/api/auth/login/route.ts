@@ -6,6 +6,7 @@ import {
   verifyPassword,
 } from "@/lib/auth-session";
 import { isDbConfigured } from "@/lib/db";
+import { audit } from "@/lib/audit-logger";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,12 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const user = await findUserByUsername(username);
   if (!user || !verifyPassword(password, user.passwordHash)) {
+    audit({
+      userId: user?.id ?? null,
+      sessionId: null,
+      eventType: "login_failed",
+      detail: { username },
+    });
     return NextResponse.json({ error: "invalid_credentials" }, { status: 401 });
   }
 
@@ -43,5 +50,11 @@ export async function POST(req: Request): Promise<NextResponse> {
     user: { id: user.id, username: user.username },
   });
   res.headers.append("Set-Cookie", buildAuthCookie(token));
+  audit({
+    userId: user.id,
+    sessionId: null,
+    eventType: "login",
+    detail: { username: user.username },
+  });
   return res;
 }
