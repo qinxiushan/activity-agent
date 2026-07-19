@@ -18,6 +18,15 @@ const activityPanelHeading = (page: Page): Locator =>
  *   3. Run: npm run test:visual
  */
 test.describe("Activity page visual", () => {
+  test("login page baseline", async ({ page }) => {
+    await page.goto("/login");
+    await expect(page.getByRole("heading", { name: "登录" })).toBeVisible({ timeout: 10_000 });
+    await page.screenshot({
+      path: join(SCREENSHOT_DIR, "login-page.png"),
+      fullPage: true,
+    });
+  });
+
   test("light mode — empty state", async ({ page }) => {
     await page.goto("/");
     await expect(activityPanelHeading(page)).toBeVisible({ timeout: 10_000 });

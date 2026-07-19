@@ -60,6 +60,34 @@ jobs:
     timeout-minutes: 10
     env:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      DATABASE_URL: postgres://activity:activity_dev@127.0.0.1:55432/activity_agent
+      REDIS_URL: redis://127.0.0.1:56379
+      STORAGE_BACKEND: postgres
+      AUTH_MODE: optional
+      RATE_LIMIT_ENABLED: "false"
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: activity
+          POSTGRES_PASSWORD: activity_dev
+          POSTGRES_DB: activity_agent
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U activity -d activity_agent"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 56379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
 
     steps:
       - uses: actions/checkout@v4
@@ -95,3 +123,56 @@ jobs:
 
       - name: Run e2e (auto-starts dev server + runs test + cleans up)
         run: npm run e2e
+
+  auth-e2e:
+    name: Required Auth E2E
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgres://activity:activity_dev@127.0.0.1:55432/activity_agent
+      REDIS_URL: redis://127.0.0.1:56379
+      STORAGE_BACKEND: postgres
+      AUTH_MODE: required
+      AUTH_SECRET: ci-auth-secret
+      RATE_LIMIT_ENABLED: "false"
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: activity
+          POSTGRES_PASSWORD: activity_dev
+          POSTGRES_DB: activity_agent
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U activity -d activity_agent"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 56379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run required-auth e2e
+        run: npm run e2e:auth

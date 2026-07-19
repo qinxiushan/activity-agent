@@ -20,6 +20,7 @@ docker compose up -d --build # app + postgres + redis + prometheus + grafana
 | Unit + integration smoke (no API key)             | `npm run test:smoke`             |
 | Real LLM e2e — one-shot (auto-starts dev server) | `npm run e2e`                    |
 | Real LLM e2e — manual (server must be running)   | `npm run e2e:real`               |
+| Required-auth e2e                                | `npm run e2e:auth`               |
 | Playwright visual                                 | `npm run test:visual`            |
 
 **Docker quick start (`AUTH_MODE=required`)**
@@ -68,12 +69,13 @@ Workflow file: **`.github/workflows/ci.yml`**
 
 [![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
 
-Two jobs:
+Three jobs:
 
 | Job            | Triggers                          | Needs secrets          | What it runs                              | Timeout |
 | -------------- | --------------------------------- | ---------------------- | ----------------------------------------- | ------- |
 | **lint** | every push + PR                   | ❌                     | `tsc --noEmit` + `npm run test:smoke` | 5 min   |
-| **e2e**  | push to`main` + manual dispatch | ✅`DEEPSEEK_API_KEY` | full LLM e2e (auto-starts dev server)     | 10 min  |
+| **auth-e2e** | every push + PR                | ❌                     | required-auth Playwright (`npm run e2e:auth`) | 10 min |
+| **e2e**  | push to`main` + manual dispatch | ✅`DEEPSEEK_API_KEY` | full LLM e2e（PG + Redis services, `AUTH_MODE=optional`） | 10 min  |
 
 **Setup after first `git push`**:
 
@@ -247,8 +249,10 @@ hooks/
   useActivitySession.ts    Minimal SSE + plan-state polling hook (separate from useAgentSession)
 
 scripts/
-  p0-smoke-test.ts         Unit + integration tests (242 assertions, no API)
+  p0-smoke-test.ts         Unit + integration tests (269 assertions, no API)
   e2e-real-llm-test.ts     Real LLM end-to-end test (requires API key)
+                           + optional-mode X-User-Id → plan_states.user_id 断言
+  e2e-auth-test.ts         Required-auth wrapper: auto-start server + run Playwright auth suite
   seed-users.ts            Idempotent seed for alice/bob test accounts
 
 docker/

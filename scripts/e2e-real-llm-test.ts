@@ -37,6 +37,7 @@
 import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Pool } from "pg";
 
 // ============================================================================
 // 配置
@@ -45,6 +46,7 @@ import path from "node:path";
 const SERVER_BASE = process.env.E2E_SERVER ?? "http://localhost:30142";
 const PLAN_STATES_DIR = path.join(os.homedir(), ".pi", "agent", "plan-states");
 const SESSIONS_DIR = path.join(os.homedir(), ".pi", "agent", "sessions");
+const E2E_USER_ID = `e2e-plan-owner-${Date.now()}`;
 
 interface ModelEntry {
   id: string;
@@ -218,12 +220,27 @@ async function waitForIdle(sessionId: string, timeoutMs: number): Promise<{ idle
 
 interface PlanState {
   sessionId: string;
+  userId?: string;
   phase: string;
   turnCount: number;
   clarificationCount: number;
   intent: Record<string, unknown>;
   plan: { summary: string; timeline: unknown[]; totalCost: number; totalDurationMinutes: number; weather: unknown } | null;
   history: Array<{ phase: string; at: number; reason?: string }>;
+}
+
+async function readPlanStateOwnerFromPg(sessionId: string): Promise<string | null> {
+  if (process.env.STORAGE_BACKEND !== "postgres" || !process.env.DATABASE_URL) return null;
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  try {
+    const { rows } = await pool.query(
+      "SELECT user_id FROM plan_states WHERE session_id=$1",
+      [sessionId],
+    );
+    return rows[0]?.user_id ?? null;
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
 }
 
 async function readPlanState(sessionId: string): Promise<PlanState | null> {
@@ -389,7 +406,10 @@ async function main(): Promise<void> {
 
   const createRes = await fetch(`${SERVER_BASE}/api/agent/new`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-User-Id": E2E_USER_ID,
+    },
     body: JSON.stringify({
       type: "prompt",
       cwd: tempCwd,
@@ -480,11 +500,18 @@ async function main(): Promise<void> {
   } else {
     ok("plan state file exists", true, `phase=${state1.phase}, turnCount=${state1.turnCount}`);
     ok("final phase after LLM turn = plan_confirm", state1.phase === "plan_confirm", `actual=${state1.phase}`);
+    ok("plan state userId captured", state1.userId === E2E_USER_ID, String(state1.userId));
     ok("intent captured (date)", !!state1.intent.date, String(state1.intent.date));
     ok("intent captured (startTime)", !!state1.intent.startTime, String(state1.intent.startTime));
     ok("intent captured (departurePoint)", !!state1.intent.departurePoint, JSON.stringify(state1.intent.departurePoint));
     ok("intent captured (partySize)", state1.intent.partySize !== undefined, String(state1.intent.partySize));
     ok("intent captured (budgetPerPerson)", state1.intent.budgetPerPerson !== undefined, String(state1.intent.budgetPerPerson));
+  }
+  const pgOwner = await readPlanStateOwnerFromPg(sessionId);
+  if (pgOwner !== null) {
+    ok("plan_states.user_id persisted to postgres", pgOwner === E2E_USER_ID, pgOwner);
+  } else {
+    console.log("  ⏭  postgres owner assertion skipped (STORAGE_BACKEND!=postgres or DATABASE_URL unset)");
   }
 
   // ─── 步骤 3: 发 "确认" ────────────────────────────────
@@ -495,7 +522,10 @@ async function main(): Promise<void> {
 
   const confirmRes = await fetch(`${SERVER_BASE}/api/agent/${sessionId}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-User-Id": E2E_USER_ID,
+    },
     body: JSON.stringify({ type: "prompt", message: "确认" }),
   });
   if (!confirmRes.ok) {
@@ -597,7 +627,10 @@ async function main(): Promise<void> {
 
 async function cleanup(sessionId: string): Promise<void> {
   try {
-    await fetch(`${SERVER_BASE}/api/sessions/${sessionId}`, { method: "DELETE" });
+    await fetch(`${SERVER_BASE}/api/sessions/${sessionId}`, {
+      method: "DELETE",
+      headers: { "X-User-Id": E2E_USER_ID },
+    });
   } catch { /* best effort */ }
 }
 

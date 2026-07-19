@@ -210,7 +210,7 @@ export class UserPreferencesStore {
   async refreshFromHistory(_planStatesDir?: string): Promise<UserPreferences> {
     await this.ensureInit();
     // 1. 加载所有 plan-states（通过 repo，file 和 pg 均统一）
-    const repo = _planStatesDir && process.env.STORAGE_BACKEND !== "postgres"
+    const repo = _planStatesDir
       ? createFilePlanStateRepo(_planStatesDir)
       : getPlanStateRepo();
     const allStates = await repo.listAll();

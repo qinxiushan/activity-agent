@@ -70,10 +70,15 @@ async function main() {
   // 若 shell 环境带了 DATABASE_URL/REDIS_URL（如开发者 export 过），
   // 先摘除，避免 health/T0 断言受宿主环境影响。T1 的 pg 合约测试
   // 会用 REAL_DATABASE_URL 做条件执行。
+  // 例外：显式 STORAGE_BACKEND=postgres 的集成 smoke 需要保留连接串，
+  // 否则前面的 booking/user-profile 持久化路径会在运行中途因缺失 env 崩掉。
   const REAL_DATABASE_URL = process.env.DATABASE_URL;
-  void REAL_DATABASE_URL;
-  delete process.env.DATABASE_URL;
-  delete process.env.REDIS_URL;
+  const REAL_REDIS_URL = process.env.REDIS_URL;
+  const preserveExternalDeps = process.env.STORAGE_BACKEND === "postgres";
+  if (!preserveExternalDeps) {
+    delete process.env.DATABASE_URL;
+    delete process.env.REDIS_URL;
+  }
 
   // ─── P0-1: POI Database（含 openingHours）────────────────────
   section("📍 P0-1: POI Database");
@@ -987,6 +992,10 @@ async function main() {
   section("🏗️ Stage-2 T0: Infra plumbing (db / redis / health)");
   const db = await import("../lib/db");
   const redis = await import("../lib/redis");
+  const prevDbUrlForT0 = process.env.DATABASE_URL;
+  const prevRedisUrlForT0 = process.env.REDIS_URL;
+  delete process.env.DATABASE_URL;
+  delete process.env.REDIS_URL;
 
   // 未配置行为（env 已在 main 顶部摘除）
   log("isDbConfigured=false when DATABASE_URL unset", db.isDbConfigured() === false);
@@ -1001,6 +1010,7 @@ async function main() {
   log("pingRedis=false (no throw) when unconfigured", (await redis.pingRedis(200)) === false);
 
   // 已配置但不可达：ping 限时返回 false，不抛错、不悬挂
+  await db.closePool();
   process.env.DATABASE_URL = "postgres://nobody:nope@127.0.0.1:1/nodb";
   process.env.REDIS_URL = "redis://127.0.0.1:1";
   log("pingDb=false when PG unreachable", (await db.pingDb(500)) === false);
@@ -1016,6 +1026,8 @@ async function main() {
   log("health: postgres_reachable='skipped' when unset", readyRes.checks.postgres_reachable === "skipped");
   log("health: redis_reachable='skipped' when unset", readyRes.checks.redis_reachable === "skipped");
   log("health: skipped deps do not block ready", readyRes.ok === true);
+  restoreEnv("DATABASE_URL", prevDbUrlForT0);
+  restoreEnv("REDIS_URL", prevRedisUrlForT0);
 
   // 迁移文件存在且被迁移器可见
   const migrationFiles = (await afs.readdir(path.join(process.cwd(), "db", "migrations")))

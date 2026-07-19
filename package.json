@@ -10,6 +10,7 @@
     "test:smoke": "tsx scripts/p0-smoke-test.ts",
     "e2e:real": "tsx scripts/e2e-real-llm-test.ts",
     "e2e": "tsx scripts/e2e-with-server.ts",
+    "e2e:auth": "tsx scripts/e2e-auth-test.ts",
     "test:visual": "playwright test",
     "db:migrate": "tsx scripts/db-migrate.ts",
     "seed:users": "tsx scripts/seed-users.ts",
