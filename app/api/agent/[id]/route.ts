@@ -10,6 +10,8 @@ import {
   isMessageRateLimitedCommand,
 } from "@/lib/rate-limiter";
 import { canAccessSession } from "@/lib/session-ownership";
+import { guardPromptCommand } from "@/lib/input-guard-route";
+import { audit } from "@/lib/audit-logger";
 
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
@@ -26,9 +28,25 @@ export async function POST(
     }
     const userId = context.userId;
 
-    if (isMessageRateLimitedCommand(body)) {
+    const guarded = guardPromptCommand(body, { userId, sessionId: id });
+    if (!guarded.ok) {
+      return NextResponse.json(guarded.body, { status: guarded.status });
+    }
+    const safeBody = guarded.command;
+
+    if (isMessageRateLimitedCommand(safeBody)) {
       const verdict = await checkMessageRateLimit(userId);
       if (!verdict.allowed) {
+        audit({
+          userId,
+          sessionId: id,
+          eventType: "rate_limited",
+          detail: {
+            action: "message",
+            retryAfterMs: verdict.retryAfterMs,
+            limit: verdict.limit,
+          },
+        });
         return NextResponse.json(formatRateLimitError(verdict.retryAfterMs), {
           status: 429,
           headers: buildRateLimitHeaders(verdict.retryAfterMs),
@@ -39,7 +57,7 @@ export async function POST(
     // Fast path: already-running session
     const existing = getRpcSession(id);
     if (existing?.isAlive()) {
-      const result = await existing.send(body);
+      const result = await existing.send(safeBody);
       return NextResponse.json({ success: true, data: result });
     }
 
@@ -54,7 +72,7 @@ export async function POST(
     const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
 
     const { session } = await startRpcSession(id, filePath, cwd, userId);
-    const result = await session.send(body);
+    const result = await session.send(safeBody);
 
     return NextResponse.json({ success: true, data: result });
   } catch (error) {

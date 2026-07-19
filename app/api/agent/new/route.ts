@@ -8,6 +8,8 @@ import {
   formatRateLimitError,
   isMessageRateLimitedCommand,
 } from "@/lib/rate-limiter";
+import { guardPromptCommand } from "@/lib/input-guard-route";
+import { audit } from "@/lib/audit-logger";
 
 // POST /api/agent/new  body: { cwd: string; type: string; message: string; ... }
 // Spawns a brand-new pi session and immediately sends the first command.
@@ -28,9 +30,25 @@ export async function POST(req: Request) {
     if (!existsSync(cwd)) {
       return NextResponse.json({ error: `Directory does not exist: ${cwd}` }, { status: 400 });
     }
-    if (isMessageRateLimitedCommand(command)) {
+    const guarded = guardPromptCommand(command, { userId, sessionId: null });
+    if (!guarded.ok) {
+      return NextResponse.json(guarded.body, { status: guarded.status });
+    }
+    const safeCommand = guarded.command;
+
+    if (isMessageRateLimitedCommand(safeCommand)) {
       const verdict = await checkMessageRateLimit(userId);
       if (!verdict.allowed) {
+        audit({
+          userId,
+          sessionId: null,
+          eventType: "rate_limited",
+          detail: {
+            action: "message",
+            retryAfterMs: verdict.retryAfterMs,
+            limit: verdict.limit,
+          },
+        });
         return NextResponse.json(formatRateLimitError(verdict.retryAfterMs), {
           status: 429,
           headers: buildRateLimitHeaders(verdict.retryAfterMs),
@@ -39,7 +57,7 @@ export async function POST(req: Request) {
     }
 
     // Use a one-time key so startRpcSession's lock doesn't conflict with real session ids
-    const { provider, modelId, thinkingLevel, ...promptCommand } = command as { provider?: string; modelId?: string; thinkingLevel?: string; [key: string]: unknown };
+    const { provider, modelId, thinkingLevel, ...promptCommand } = safeCommand as { provider?: string; modelId?: string; thinkingLevel?: string; [key: string]: unknown };
 
     const tempKey = `__new__${Date.now()}`;
     const { session, realSessionId } = await startRpcSession(tempKey, "", cwd, userId);
