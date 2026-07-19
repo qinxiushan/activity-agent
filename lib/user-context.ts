@@ -29,9 +29,16 @@ export interface ResolvedUserContext {
   source: "auth" | "header" | "cookie" | "os";
 }
 
-export function resolveUserContext(req: Request): ResolvedUserContext {
+export function resolveUserContextFromValues({
+  authToken,
+  headerUid,
+  legacyCookie,
+}: {
+  authToken?: string | null;
+  headerUid?: string | null;
+  legacyCookie?: string | null;
+}): ResolvedUserContext {
   const mode = getAuthMode();
-  const authToken = readCookie(req, AUTH_COOKIE_NAME);
   const authSession = verifyAuthSessionToken(authToken);
 
   if (authSession) {
@@ -56,7 +63,6 @@ export function resolveUserContext(req: Request): ResolvedUserContext {
     };
   }
 
-  const headerUid = req.headers.get("x-user-id");
   if (headerUid) {
     return {
       mode,
@@ -68,7 +74,6 @@ export function resolveUserContext(req: Request): ResolvedUserContext {
     };
   }
 
-  const legacyCookie = readCookie(req, "pi_user");
   if (legacyCookie) {
     return {
       mode,
@@ -88,4 +93,12 @@ export function resolveUserContext(req: Request): ResolvedUserContext {
     isDev: false,
     source: "os",
   };
+}
+
+export function resolveUserContext(req: Request): ResolvedUserContext {
+  return resolveUserContextFromValues({
+    authToken: readCookie(req, AUTH_COOKIE_NAME),
+    headerUid: req.headers.get("x-user-id"),
+    legacyCookie: readCookie(req, "pi_user"),
+  });
 }

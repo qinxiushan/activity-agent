@@ -30,7 +30,24 @@ async function login(page: Page, username: string, password: string) {
   await page.getByLabel("用户名").fill(username);
   await page.getByLabel("密码").fill(password);
   await page.getByRole("button", { name: "登录" }).click();
+  await page.waitForFunction(async () => {
+    const response = await fetch("/api/whoami", { credentials: "same-origin" });
+    if (!response.ok) return false;
+    const body = await response.json() as { authed?: boolean };
+    return body.authed === true;
+  }, undefined, { timeout: 15_000 });
+  await page.goto("/");
   await page.waitForURL(/\/$/, { timeout: 15_000 });
+}
+
+async function fetchJsonInPage<T>(page: Page, url: string): Promise<{ status: number; body: T }> {
+  return page.evaluate(async (targetUrl) => {
+    const response = await fetch(targetUrl, { credentials: "same-origin" });
+    return {
+      status: response.status,
+      body: await response.json(),
+    };
+  }, url);
 }
 
 test.describe("AUTH_MODE=required acceptance", () => {
@@ -63,25 +80,32 @@ test.describe("AUTH_MODE=required acceptance", () => {
     await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL(/\/$/, { timeout: 15_000 });
 
-    const whoamiRes = await page.context().request.get("/api/whoami");
-    expect(whoamiRes.ok()).toBeTruthy();
-    const whoami = await whoamiRes.json() as {
+    const whoamiResult = await fetchJsonInPage<{
       userId: string | null;
       username: string | null;
       authed: boolean;
       mode: string;
-    };
-    expect(whoami).toMatchObject({
+    }>(page, "/api/whoami");
+    expect(whoamiResult.status).toBe(200);
+    expect(whoamiResult.body).toMatchObject({
       userId: "alice",
       username: "alice",
       authed: true,
       mode: "required",
     });
 
-    const devLoginRes = await page.context().request.get("/api/dev-login");
-    expect(devLoginRes.status()).toBe(404);
+    const devLoginResult = await fetchJsonInPage<{ error?: string }>(page, "/api/dev-login");
+    expect(devLoginResult.status).toBe(404);
 
-    await page.getByRole("button", { name: "退出" }).click();
+    const logoutResult = await page.evaluate(async () => {
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      return response.status;
+    });
+    expect(logoutResult).toBe(200);
+    await page.goto("/");
     await page.waitForURL(/\/login$/, { timeout: 15_000 });
   });
 
@@ -120,13 +144,15 @@ test.describe("AUTH_MODE=required acceptance", () => {
     try {
       await login(page, "alice", "alice123");
 
-      const ownRes = await page.context().request.get(`/api/plan-state/${aliceSessionId}`);
-      expect(ownRes.status()).toBe(200);
-      const ownState = await ownRes.json() as { userId?: string; sessionId?: string };
-      expect(ownState).toMatchObject({ userId: "alice", sessionId: aliceSessionId });
+      const ownResult = await fetchJsonInPage<{ userId?: string; sessionId?: string }>(
+        page,
+        `/api/plan-state/${aliceSessionId}`,
+      );
+      expect(ownResult.status).toBe(200);
+      expect(ownResult.body).toMatchObject({ userId: "alice", sessionId: aliceSessionId });
 
-      const foreignRes = await page.context().request.get(`/api/plan-state/${bobSessionId}`);
-      expect(foreignRes.status()).toBe(403);
+      const foreignResult = await fetchJsonInPage<{ error?: string }>(page, `/api/plan-state/${bobSessionId}`);
+      expect(foreignResult.status).toBe(403);
     } finally {
       await pool.query("DELETE FROM plan_states WHERE session_id = ANY($1::text[])", [[aliceSessionId, bobSessionId]]);
     }

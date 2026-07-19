@@ -1,38 +1,29 @@
-"use client";
+function getErrorMessage(error?: string): string | null {
+  switch (error) {
+    case "invalid_credentials":
+      return "用户名或密码错误";
+    case "missing_credentials":
+      return "请输入用户名和密码";
+    case "auth_unavailable":
+      return "登录服务暂不可用";
+    case "invalid_json":
+      return "登录请求格式错误";
+    default:
+      return null;
+  }
+}
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-
-export default function LoginPage() {
-  const router = useRouter();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok || body.error) {
-        setError(body.error === "invalid_credentials" ? "用户名或密码错误" : "登录失败");
-        return;
-      }
-      router.replace("/");
-      router.refresh();
-    } catch {
-      setError("登录失败");
-    } finally {
-      setSubmitting(false);
-    }
-  };
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const errorParam = params?.error;
+  const usernameParam = params?.username;
+  const error = Array.isArray(errorParam) ? errorParam[0] : errorParam;
+  const username = Array.isArray(usernameParam) ? usernameParam[0] : usernameParam;
+  const errorMessage = getErrorMessage(error);
 
   return (
     <main style={{
@@ -44,7 +35,8 @@ export default function LoginPage() {
       padding: 24,
     }}>
       <form
-        onSubmit={handleSubmit}
+        action="/api/auth/login"
+        method="post"
         style={{
           width: "100%",
           maxWidth: 360,
@@ -66,8 +58,8 @@ export default function LoginPage() {
         <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
           用户名
           <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            name="username"
+            defaultValue={username ?? ""}
             autoComplete="username"
             style={{
               height: 38,
@@ -82,9 +74,8 @@ export default function LoginPage() {
         <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
           密码
           <input
+            name="password"
             type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
             style={{
               height: 38,
@@ -96,23 +87,22 @@ export default function LoginPage() {
             }}
           />
         </label>
-        {error && (
-          <div style={{ fontSize: 12, color: "#ef4444" }}>{error}</div>
+        {errorMessage && (
+          <div style={{ fontSize: 12, color: "#ef4444" }}>{errorMessage}</div>
         )}
         <button
           type="submit"
-          disabled={submitting}
           style={{
             height: 40,
             borderRadius: 10,
             border: "1px solid var(--border)",
             background: "var(--accent)",
             color: "#fff",
-            cursor: submitting ? "wait" : "pointer",
+            cursor: "pointer",
             fontWeight: 600,
           }}
         >
-          {submitting ? "登录中…" : "登录"}
+          登录
         </button>
       </form>
     </main>

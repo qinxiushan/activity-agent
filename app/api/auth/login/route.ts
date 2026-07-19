@@ -1,31 +1,64 @@
 import { NextResponse } from "next/server";
 import {
-  buildAuthCookie,
   createAuthSessionToken,
   findUserByUsername,
   verifyPassword,
 } from "@/lib/auth-session";
+import { AUTH_COOKIE_NAME } from "@/lib/auth-constants";
 import { isDbConfigured } from "@/lib/db";
 import { audit } from "@/lib/audit-logger";
 
 export const dynamic = "force-dynamic";
 
+function isJsonRequest(req: Request): boolean {
+  const contentType = req.headers.get("content-type") ?? "";
+  return contentType.includes("application/json");
+}
+
+async function readCredentials(req: Request): Promise<{ username?: string; password?: string } | null> {
+  if (isJsonRequest(req)) {
+    return (await req.json()) as { username?: string; password?: string };
+  }
+
+  const form = await req.formData();
+  return {
+    username: String(form.get("username") ?? ""),
+    password: String(form.get("password") ?? ""),
+  };
+}
+
+function respondAuthError(
+  req: Request,
+  error: string,
+  status: number,
+  username?: string,
+): NextResponse {
+  if (isJsonRequest(req)) {
+    return NextResponse.json({ error }, { status });
+  }
+
+  const redirectUrl = new URL("/login", req.url);
+  redirectUrl.searchParams.set("error", error);
+  if (username) redirectUrl.searchParams.set("username", username);
+  return NextResponse.redirect(redirectUrl, { status: 303 });
+}
+
 export async function POST(req: Request): Promise<NextResponse> {
   if (!isDbConfigured()) {
-    return NextResponse.json({ error: "auth_unavailable" }, { status: 503 });
+    return respondAuthError(req, "auth_unavailable", 503);
   }
 
-  let body: { username?: string; password?: string };
+  let body: { username?: string; password?: string } | null;
   try {
-    body = (await req.json()) as typeof body;
+    body = await readCredentials(req);
   } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+    return respondAuthError(req, "invalid_json", 400);
   }
 
-  const username = body.username?.trim();
-  const password = body.password ?? "";
+  const username = body?.username?.trim();
+  const password = body?.password ?? "";
   if (!username || !password) {
-    return NextResponse.json({ error: "missing_credentials" }, { status: 400 });
+    return respondAuthError(req, "missing_credentials", 400, username);
   }
 
   const user = await findUserByUsername(username);
@@ -36,7 +69,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       eventType: "login_failed",
       detail: { username },
     });
-    return NextResponse.json({ error: "invalid_credentials" }, { status: 401 });
+    return respondAuthError(req, "invalid_credentials", 401, username);
   }
 
   const token = createAuthSessionToken({
@@ -45,11 +78,17 @@ export async function POST(req: Request): Promise<NextResponse> {
     iat: Date.now(),
   });
 
-  const res = NextResponse.json({
-    ok: true,
-    user: { id: user.id, username: user.username },
+  const res = isJsonRequest(req)
+    ? NextResponse.json({
+        ok: true,
+        user: { id: user.id, username: user.username },
+      })
+    : NextResponse.redirect(new URL("/", req.url), { status: 303 });
+  res.cookies.set(AUTH_COOKIE_NAME, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
   });
-  res.headers.append("Set-Cookie", buildAuthCookie(token));
   audit({
     userId: user.id,
     sessionId: null,

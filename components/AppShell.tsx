@@ -13,7 +13,17 @@ import { useActivitySession } from "@/hooks/useActivitySession";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 
-export function AppShell() {
+export function AppShell({
+  initialIdentity = null,
+}: {
+  initialIdentity?: {
+    userId: string;
+    username: string | null;
+    authed: boolean;
+    isDev: boolean;
+    mode: "disabled" | "optional" | "required";
+  } | null;
+}) {
   const MOBILE_BREAKPOINT_PX = 960;
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -100,29 +110,44 @@ export function AppShell() {
     authed: boolean;
     isDev: boolean;
     mode: "disabled" | "optional" | "required";
-  } | null>(null);
-  useEffect(() => {
-    fetch("/api/whoami")
-      .then((r) => r.ok ? r.json() : null)
-      .then((d: {
-        userId?: string | null;
-        username?: string | null;
-        authed?: boolean;
-        isDev?: boolean;
-        mode?: "disabled" | "optional" | "required";
-      } | null) => {
-        if (d && typeof d.userId === "string") {
-          setIdentity({
-            userId: d.userId,
-            username: d.username ?? null,
-            authed: d.authed === true,
-            isDev: d.isDev === true,
-            mode: d.mode ?? "optional",
-          });
-        }
-      })
-      .catch(() => {});
+  } | null>(initialIdentity);
+  const loadIdentity = useCallback(async (attempt = 0): Promise<void> => {
+    try {
+      const response = await fetch("/api/whoami", { cache: "no-store" });
+      const data = response.ok
+        ? await response.json() as {
+            userId?: string | null;
+            username?: string | null;
+            authed?: boolean;
+            isDev?: boolean;
+            mode?: "disabled" | "optional" | "required";
+          }
+        : null;
+
+      if (data && typeof data.userId === "string") {
+        setIdentity({
+          userId: data.userId,
+          username: data.username ?? null,
+          authed: data.authed === true,
+          isDev: data.isDev === true,
+          mode: data.mode ?? "optional",
+        });
+        return;
+      }
+    } catch {
+      // Retry below for transient auth/cookie races.
+    }
+
+    if (attempt < 4) {
+      window.setTimeout(() => {
+        void loadIdentity(attempt + 1);
+      }, 250 * (attempt + 1));
+    }
   }, []);
+
+  useEffect(() => {
+    void loadIdentity();
+  }, [loadIdentity]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -130,6 +155,7 @@ export function AppShell() {
     } catch {
       // ignore client-side logout errors and let the redirect refresh state
     }
+    setIdentity(null);
     router.replace("/login");
     router.refresh();
   }, [router]);
