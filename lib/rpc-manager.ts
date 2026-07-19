@@ -76,6 +76,7 @@ export class AgentSessionWrapper {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private onDestroyCallback: (() => void) | null = null;
   private _alive = true;
+  private lastError: { code: string; message: string; retryable: boolean } | null = null;
   public readonly planState: PlanStateManager;
   private eventAdapter: EventAdapter;
 
@@ -101,10 +102,7 @@ export class AgentSessionWrapper {
       this.resetIdleTimer();
       const standardEvents = this.eventAdapter.adapt(event as unknown as Parameters<EventAdapter["adapt"]>[0]);
       for (const standardEvent of standardEvents) {
-        // 分发给业务 listener
-        for (const l of this.listeners) l(standardEvent);
-        // 采集 metrics
-        this.collectMetrics(standardEvent);
+        this.dispatchEvent(standardEvent);
       }
     });
     this.resetIdleTimer();
@@ -133,6 +131,11 @@ export class AgentSessionWrapper {
     } catch (e) {
       console.error("[metrics] collect failed:", e);
     }
+  }
+
+  private dispatchEvent(event: StandardEvent): void {
+    for (const listener of this.listeners) listener(event);
+    this.collectMetrics(event);
   }
 
   /** 从 globalThis 获取活跃 session 数（与 AgentSessionWrapper 共享注册表） */
@@ -206,11 +209,23 @@ export class AgentSessionWrapper {
       case "prompt": {
         const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         const userMessage = command.message as string;
+        this.lastError = null;
         await this.advancePlanPhase(userMessage);
         // 在 AsyncLocalStorage 作用域内运行 prompt，确保工具 execute 读到正确的 planState
-        withPlanState(this.planState, () =>
-          this.inner.prompt(userMessage, promptImages?.length ? { images: promptImages } : undefined).catch(() => {})
-        );
+        void withPlanState(
+          this.planState,
+          () => this.inner.prompt(userMessage, promptImages?.length ? { images: promptImages } : undefined),
+        ).catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          this.lastError = { code: "PROMPT_FAILED", message, retryable: true };
+          console.error(`[rpc-manager] prompt failed for ${this.sessionId}:`, error);
+          this.dispatchEvent({
+            type: "error",
+            code: "PROMPT_FAILED",
+            message,
+            retryable: true,
+          });
+        });
         return null;
       }
 
@@ -236,6 +251,7 @@ export class AgentSessionWrapper {
             : null,
           systemPrompt: this.inner.agent.state?.systemPrompt ?? "",
           thinkingLevel: this.inner.agent.state?.thinkingLevel ?? "auto",
+          lastError: this.lastError,
         };
       }
 

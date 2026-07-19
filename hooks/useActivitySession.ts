@@ -241,6 +241,13 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
             }));
             break;
           }
+          case "error":
+            setState((prev) => ({
+              ...prev,
+              agentRunning: false,
+              error: typeof ev.message === "string" ? ev.message : "LLM 执行失败",
+            }));
+            break;
         }
       };
       es.onerror = () => {

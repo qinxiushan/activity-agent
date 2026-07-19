@@ -26,7 +26,11 @@ docker compose up -d --build # app + postgres + redis
 3. 如需默认模型/自定义 provider，再复制：
    `docker cp ~/.pi/agent/settings.json $(docker compose ps -q app):/home/nextjs/.pi/agent/settings.json`
    `docker cp ~/.pi/agent/models.json $(docker compose ps -q app):/home/nextjs/.pi/agent/models.json`
-4. 浏览器打开 `http://localhost:30142/`，应先跳转 `/login`
+4. **复制后必须修权限或重启 app**（`auth.json` 常见是 `0600`，直接 `docker cp` 后可能变成 root/node 拥有，`nextjs` 进程读不到）：
+   `docker compose exec app sh -lc 'chown nextjs:nodejs /home/nextjs/.pi/agent/auth.json /home/nextjs/.pi/agent/settings.json /home/nextjs/.pi/agent/models.json 2>/dev/null || true && chmod 600 /home/nextjs/.pi/agent/auth.json 2>/dev/null || true && chmod 644 /home/nextjs/.pi/agent/settings.json /home/nextjs/.pi/agent/models.json 2>/dev/null || true'`
+   或者直接：
+   `docker compose restart app`
+5. 浏览器打开 `http://localhost:30142/`，应先跳转 `/login`
 
 容器模式下，pi SDK 仍然读取同一套 3 文件：
 
