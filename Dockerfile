@@ -1,3 +1,22 @@
+FROM docker.m.daocloud.io/library/node:22-alpine AS deps
+WORKDIR /app
+
+RUN apk add --no-cache libc6-compat
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+FROM docker.m.daocloud.io/library/node:22-alpine AS builder
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN npm run build
+
 FROM docker.m.daocloud.io/library/node:22-alpine AS runner
 WORKDIR /app
 
@@ -8,11 +27,12 @@ RUN apk add --no-cache bash su-exec wget \
 ENV NODE_ENV=production
 ENV PORT=30142
 ENV HOSTNAME=0.0.0.0
+ENV NEXT_TELEMETRY_DISABLED=1
 
-COPY public ./public
-COPY .next/standalone ./
-COPY .next/static ./.next/static
-COPY db ./db
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/db ./db
 COPY docker/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh \

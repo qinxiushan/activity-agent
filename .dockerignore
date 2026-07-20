@@ -1,10 +1,6 @@
 .git
 .github
-.next/*
-!.next/standalone
-!.next/standalone/**
-!.next/static
-!.next/static/**
+.next
 node_modules
 test-results
 playwright-report

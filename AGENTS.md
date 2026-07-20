@@ -37,15 +37,12 @@ docker compose up -d --build # app + postgres + redis + prometheus + grafana
    `docker compose restart app`
 5. 浏览器打开 `http://localhost:30142/`，应先跳转 `/login`
 
-**重要：`docker compose build` 依赖本地最新 `.next/standalone`**
+**重要：Docker 镜像现在在容器内执行完整 `next build`**
 
-- 当前 `Dockerfile` **不会**在镜像内执行 `next build`，而是直接 `COPY .next/standalone` 和 `.next/static`
-- 因此代码改动后，如果要让容器拿到最新应用代码，必须先重新生成 `.next`
-- Next 16 构建要求 **Node >= 20.9.0**；宿主机如果还是 Node 18，`npm run build` 会直接失败
-- 宿主机版本不够时，用 Node 22 容器构建：
-  `docker run --rm -v "$PWD":/work -w /work docker.m.daocloud.io/library/node:22-alpine sh -lc "npm run build"`
-- 然后再执行：
-  `DOCKER_BUILDKIT=0 docker compose up -d --build app`
+- 当前 `Dockerfile` 已改为标准多阶段构建：`deps -> builder -> runner`
+- `docker compose up -d --build` 会在镜像构建阶段自动执行 `npm ci` 和 `npm run build`
+- 不再依赖宿主机预先生成 `.next/standalone`
+- 宿主机 Node 版本不再影响镜像内构建结果，只影响你在本机直接执行 `npm run build` 的体验
 
 **监控端口**
 
