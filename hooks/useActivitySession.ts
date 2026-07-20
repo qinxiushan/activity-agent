@@ -19,6 +19,7 @@ export interface ActivityToolCall {
 
 export interface ActivityPlanState {
   phase: string;
+  planHash?: string;
   turnCount: number;
   clarificationCount: number;
   intent: Record<string, unknown>;
@@ -94,6 +95,7 @@ const PLAN_POLL_ERROR_THRESHOLD = 3;
 export interface UseActivitySessionResult extends ActivityState {
   startSession: (cwd: string, message: string, model: { provider: string; modelId: string }) => Promise<boolean>;
   sendMessage: (message: string) => Promise<boolean>;
+  confirmPlan: (planHash: string) => Promise<boolean>;
   abort: () => Promise<void>;
   reset: () => void;
   retryPlanPoll: () => Promise<void>;
@@ -333,6 +335,33 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
     }
   }, [serverBase]);
 
+  const confirmPlan = useCallback(async (planHash: string) => {
+    const sid = sessionIdRef.current;
+    if (!sid) return false;
+    try {
+      const res = await fetch(`${serverBase}/api/agent/${encodeURIComponent(sid)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "confirm_plan", planHash }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string; message?: string;
+        data?: { error?: string; message?: string; phase?: string };
+      };
+      // POST 路由返回 { success, data }；confirm 的业务错误（PLAN_CHANGED / NOT_IN_CONFIRM_PHASE）在 data 里
+      const inner = body.data && typeof body.data === "object" ? body.data : body;
+      if (!res.ok || body.error || inner.error) {
+        setState((prev) => ({ ...prev, error: inner.message ?? inner.error ?? body.error ?? "确认失败" }));
+        return false;
+      }
+      setState((prev) => ({ ...prev, error: null }));
+      return true;
+    } catch (e) {
+      setState((prev) => ({ ...prev, error: e instanceof Error ? e.message : String(e) }));
+      return false;
+    }
+  }, [serverBase]);
+
   const abort = useCallback(async () => {
     const sid = sessionIdRef.current;
     if (!sid) return;
@@ -388,5 +417,5 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
     startPlanPoll(sid);
   }, [connectEvents, startPlanPoll]);
 
-  return { ...state, startSession, sendMessage, abort, reset, retryPlanPoll, trackSession };
+  return { ...state, startSession, sendMessage, confirmPlan, abort, reset, retryPlanPoll, trackSession };
 }

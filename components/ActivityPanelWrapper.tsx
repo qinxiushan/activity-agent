@@ -16,6 +16,7 @@ interface Props {
   reset: () => void;
   abort: () => Promise<void>;
   retryPlanPoll: () => Promise<void>;
+  confirmPlan: (planHash: string) => Promise<boolean>;
 }
 
 export function ActivityPanelWrapper({
@@ -29,8 +30,10 @@ export function ActivityPanelWrapper({
   reset,
   abort,
   retryPlanPoll,
+  confirmPlan,
 }: Props) {
   const [aborting, setAborting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const handleAbort = async () => {
     if (aborting) return;
@@ -39,6 +42,16 @@ export function ActivityPanelWrapper({
       await abort();
     } finally {
       setAborting(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (confirming || !planState?.planHash) return;
+    setConfirming(true);
+    try {
+      await confirmPlan(planState.planHash);
+    } finally {
+      setConfirming(false);
     }
   };
 
@@ -152,6 +165,27 @@ export function ActivityPanelWrapper({
           <div style={{ textAlign: "center", color: "var(--text-dim)", padding: "32px 12px" }}>
             <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>等待活动开始</div>
             <div style={{ fontSize: 10 }}>在中间栏输入需求,此处显示 SOP 阶段、工具调用、方案时间线</div>
+          </div>
+        )}
+        {planState?.phase === "plan_confirm" && planState.planHash && (
+          <div style={{ marginBottom: 10 }}>
+            <button
+              onClick={() => void handleConfirm()}
+              disabled={confirming || agentRunning}
+              title="结构化确认（带方案指纹，独立于对话文本，防注入伪造 / 防串版本）"
+              style={{
+                width: "100%", padding: "8px 10px",
+                background: confirming || agentRunning ? "var(--bg-muted)" : "#16a34a",
+                color: "#fff", border: "none", borderRadius: 6,
+                fontSize: 12, fontWeight: 600,
+                cursor: confirming || agentRunning ? "default" : "pointer",
+              }}
+            >
+              {confirming ? "确认中…" : "✓ 确认并预订"}
+            </button>
+            <div style={{ fontSize: 9, color: "var(--text-dim)", marginTop: 3, textAlign: "center" }}>
+              方案指纹 {planState.planHash.slice(0, 8)}… · 确认独立于对话文本
+            </div>
           </div>
         )}
         <UserPreferencesPanel />

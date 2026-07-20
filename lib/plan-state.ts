@@ -19,6 +19,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getPlanStateRepo } from "./storage";
+import { reduce, type PlanEvent, type ReduceOutput } from "./plan-reducer";
 
 // ─── 类型定义 ──────────────────────────────────────────────────────
 
@@ -185,6 +186,34 @@ export class PlanStateManager {
     this.state.history.push({ phase: to, at: Date.now(), reason: reason ?? `from ${from}` });
     await this.persist();
     return { ok: true };
+  }
+
+  /**
+   * 事件驱动的相位转移（route-B）：唯一入口，各处只 dispatch(event)。
+   * reduce() 决定下一相位，isTransitionAllowed 兜底拦非法转移，仅在变化时持久化。
+   */
+  async dispatch(event: PlanEvent): Promise<ReduceOutput> {
+    const out = reduce(this.state, event);
+    let changed = false;
+
+    if (out.phase !== this.state.phase) {
+      if (!isTransitionAllowed(this.state.phase, out.phase)) {
+        return { phase: this.state.phase, effects: [...out.effects, "illegal_transition"] };
+      }
+      const from = this.state.phase;
+      this.state.phase = out.phase;
+      this.state.lastTransitionAt = Date.now();
+      this.state.history.push({ phase: out.phase, at: Date.now(), reason: `event:${event.type} (from ${from})` });
+      changed = true;
+    }
+
+    if (out.plan && out.plan !== this.state.plan) {
+      this.state.plan = out.plan;
+      changed = true;
+    }
+
+    if (changed) await this.persist();
+    return out;
   }
 
   recordIntent(intent: Partial<CapturedIntent>): void {

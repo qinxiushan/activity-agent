@@ -805,6 +805,7 @@ export function AppShell({
               reset={activity.reset}
               abort={activity.abort}
               retryPlanPoll={activity.retryPlanPoll}
+              confirmPlan={activity.confirmPlan}
             />
           </div>
         </div>

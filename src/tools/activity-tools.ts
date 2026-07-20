@@ -46,6 +46,7 @@ import {
   persistWrapOpts,
 } from "../../lib/tool-wrapper";
 import { MAX_CLARIFICATIONS, getActivePlanState, getMissingCriticalFields } from "../../lib/plan-state";
+import { hashOf } from "../../lib/plan-reducer";
 import { getWeather } from "../../lib/weather-service";
 import { computeRoute, buildRouteChain } from "../../lib/route-service";
 import { isOpenAt, parseHoursString } from "../../lib/opening-hours-service";
@@ -203,19 +204,21 @@ export function getActivityPlannerTools(): ToolDefinition[] {
               details: { error: true, code: "SUBMIT_PLAN_OUT_OF_PHASE" },
             };
           }
+          const submittedPlan = {
+            summary: params.plan.summary,
+            timeline: params.plan.timeline,
+            totalCost: params.plan.totalCost,
+            totalDurationMinutes: params.plan.totalDurationMinutes,
+            weather: params.plan.weather,
+          };
+          const planHash = hashOf(submittedPlan);
           if (mgr) {
-            mgr.recordPlan({
-              summary: params.plan.summary,
-              timeline: params.plan.timeline,
-              totalCost: params.plan.totalCost,
-              totalDurationMinutes: params.plan.totalDurationMinutes,
-              weather: params.plan.weather,
-            });
-            const result = await mgr.transition("plan_confirm", "plan submitted by LLM");
-            if (!result.ok) {
+            const out = await mgr.dispatch({ type: "PLAN_SUBMITTED", plan: submittedPlan });
+            if (out.phase !== "plan_confirm") {
               return {
                 content: [{ type: "text" as const, text: JSON.stringify({
-                  error: true, code: "PHASE_TRANSITION_FAILED", message: result.error,
+                  error: true, code: "PHASE_TRANSITION_FAILED",
+                  message: `plan 提交后未进入 plan_confirm（当前 ${out.phase}；effects: ${out.effects.join(",")}）`,
                 }, null, 2) }],
                 details: { error: true, code: "PHASE_TRANSITION_FAILED" },
               };
@@ -225,10 +228,11 @@ export function getActivityPlannerTools(): ToolDefinition[] {
             content: [{ type: "text" as const, text: JSON.stringify({
               planSubmitted: true,
               plan: params.plan,
+              planHash,
               nextPhase: "plan_confirm",
               messageToUser: "方案已生成，请用户确认（确认/修改/重新生成）",
             }, null, 2) }],
-            details: { planSubmitted: true, plan: params.plan },
+            details: { planSubmitted: true, plan: params.plan, planHash },
           };
         }
 
@@ -255,11 +259,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
               autoFilledFields = af;
             }
             const missing = getMissingCriticalFields(mgr.intent);
-            if (missing.length === 0) {
-              await mgr.transition("planning", autoFilledFields.length > 0
-                ? `all critical fields captured (${autoFilledFields.length} from user prefs: ${autoFilledFields.join(", ")})`
-                : "all critical fields captured");
-            }
+            await mgr.dispatch({ type: "INTENT_FIELDS_UPDATED", missingCount: missing.length });
           }
 
           return {
@@ -320,11 +320,12 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           };
         }
 
-        const transResult = await mgr.transition("clarifying", "ask_clarification invoked");
-        if (!transResult.ok) {
+        const clarifyOut = await mgr.dispatch({ type: "CLARIFICATION_ASKED" });
+        if (clarifyOut.phase !== "clarifying") {
           return {
             content: [{ type: "text" as const, text: JSON.stringify({
-              error: true, code: "PHASE_TRANSITION_FAILED", message: transResult.error,
+              error: true, code: "PHASE_TRANSITION_FAILED",
+              message: `进入 clarifying 失败（当前 ${clarifyOut.phase}；effects: ${clarifyOut.effects.join(",")}）`,
             }, null, 2) }],
             details: { error: true, code: "PHASE_TRANSITION_FAILED" },
           };
@@ -630,8 +631,8 @@ export function getActivityPlannerTools(): ToolDefinition[] {
         const result = { planId: params.planId ?? `plan-${Date.now().toString(36)}`, saved: true };
         const mgr = getActivePlanState();
         if (mgr && mgr.currentPhase === "executing") {
-          const trans = await mgr.transition("completed", "plan saved");
-          if (trans.ok) {
+          const out = await mgr.dispatch({ type: "PLAN_SAVED" });
+          if (out.phase === "completed") {
             try {
               await getUserPreferencesStore(getCurrentUserId()).recordCompletedSession(mgr.current);
             } catch (e) {

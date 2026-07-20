@@ -36,6 +36,9 @@ export interface BookingRepo {
 
   /** 列出全部订单（供迁移脚本使用） */
   listAll(): BookingOrder[] | Promise<BookingOrder[]>;
+
+  /** 按幂等键查订单（不存在返回 null）。route-B：防重复下单。 */
+  findByIdempotencyKey(key: string): BookingOrder | null | Promise<BookingOrder | null>;
 }
 
 // ─── UserProfileRepo ──────────────────────────────────────────────

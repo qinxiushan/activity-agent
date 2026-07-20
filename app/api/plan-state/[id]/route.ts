@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getPlanStateRepo } from "@/lib/storage";
 import { canAccessOwner } from "@/lib/session-ownership";
 import { resolveUserContext } from "@/lib/user-context";
+import { hashOf } from "@/lib/plan-reducer";
 
 export async function GET(
   req: Request,
@@ -21,7 +22,7 @@ export async function GET(
     if (!canAccessOwner(state.userId, context.userId, context.mode)) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
-    return NextResponse.json(state);
+    return NextResponse.json({ ...state, planHash: hashOf(state.plan) });
   } catch (e) {
     return NextResponse.json(
       { error: "read_failed", message: (e as Error).message },

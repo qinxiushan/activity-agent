@@ -23,6 +23,14 @@ function isFileBackend(): boolean {
   return process.env.STORAGE_BACKEND !== "postgres";
 }
 
+/**
+ * 从订单身份派生幂等键：同一用户 + 餐厅 + 日期 + 时段 + 人数视为同一次预订。
+ * 双击 / 重试 / agent 重跑携带相同身份 → 命中已存在订单，不重复创建。
+ */
+function deriveIdempotencyKey(input: CreateBookingInput): string {
+  return `idem:${input.userId}:${input.restaurantId}:${input.date}:${input.time}:${input.partySize}`;
+}
+
 // ─── 类型定义 ──────────────────────────────────────────────────────
 
 export type OrderStatus =
@@ -48,6 +56,8 @@ export interface BookingOrder {
   failureReason?: string;
   confirmationCode?: string;
   retryCount: number;
+  /** 幂等键：同一 (user,restaurant,date,time,partySize) 只创建一次订单 */
+  idempotencyKey?: string;
 }
 
 export interface CreateBookingInput {
@@ -58,6 +68,8 @@ export interface CreateBookingInput {
   partySize: number;
   specialRequests?: string;
   userId: string;
+  /** 可选幂等键；不传则由 deriveIdempotencyKey 从订单身份派生 */
+  idempotencyKey?: string;
 }
 
 export interface BookingServiceConfig {
@@ -107,6 +119,16 @@ export class BookingService {
   async createBooking(input: CreateBookingInput): Promise<BookingOrder> {
     await this.ensureInit();
 
+    // 0. 幂等：同一订单身份只创建一次（防双击 / 重试 / agent 重跑重复下单）
+    const idempotencyKey = input.idempotencyKey ?? deriveIdempotencyKey(input);
+    const existing =
+      this.findInCacheByIdempotencyKey(idempotencyKey) ??
+      (await getBookingRepo().findByIdempotencyKey(idempotencyKey));
+    if (existing) {
+      this.cache.set(existing.orderId, existing);
+      return existing;
+    }
+
     // 1. 校验餐厅存在
     const poi = getPOIById(input.restaurantId);
     if (!poi) {
@@ -130,6 +152,7 @@ export class BookingService {
       orderId: this.generateOrderId(),
       status: "pending",
       ...input,
+      idempotencyKey,
       createdAt: now,
       updatedAt: now,
       retryCount: 0,
@@ -144,6 +167,14 @@ export class BookingService {
     });
 
     return order;
+  }
+
+  /** 从内存缓存按幂等键查已存在订单（同进程内快路径） */
+  private findInCacheByIdempotencyKey(key: string): BookingOrder | undefined {
+    for (const order of this.cache.values()) {
+      if (order.idempotencyKey === key) return order;
+    }
+    return undefined;
   }
 
   // ─── 异步处理（模拟外部 API） ────────────────────────────────

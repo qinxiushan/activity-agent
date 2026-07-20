@@ -147,6 +147,15 @@ export function createPgBookingRepo(): BookingRepo {
       );
       return rows.map(rowToBooking);
     },
+
+    async findByIdempotencyKey(key: string): Promise<BookingOrder | null> {
+      // payload JSONB 已存完整订单（含 idempotencyKey），直接查，无需加列/迁移
+      const { rows } = await getPool().query(
+        "SELECT * FROM bookings WHERE payload->>'idempotencyKey' = $1 LIMIT 1",
+        [key],
+      );
+      return rows.length === 0 ? null : rowToBooking(rows[0]);
+    },
   };
 }
 

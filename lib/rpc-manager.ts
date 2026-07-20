@@ -11,6 +11,7 @@ import type { AgentSessionLike, ToolInfo } from "./pi-types";
 import { getActivityPlannerTools, TOOL_METADATA } from "@/src/tools/activity-tools";
 import { ACTIVITY_PLANNER_SYSTEM_PROMPT } from "@/src/prompts/activity-planner";
 import { withPlanState, PlanStateManager, classifyUserConfirmation, describeWaitingFor } from "./plan-state";
+import { hashOf, type Intent } from "./plan-reducer";
 import { EventAdapter } from "./event-adapter";
 import type { StandardEvent } from "./event-types";
 import { metrics } from "./metrics-registry";
@@ -188,28 +189,30 @@ export class AgentSessionWrapper {
   private async advancePlanPhase(userMessage: string): Promise<void> {
     const mgr = this.planState;
     mgr.incrementTurn();
-    const currentPhase = mgr.currentPhase;
-    const intent = classifyUserConfirmation(userMessage);
+    const phase = mgr.currentPhase;
+    const verdict = classifyUserConfirmation(userMessage); // 轻量兜底分类：confirm|reject|modify|ambiguous
 
-    if (currentPhase === "idle" || currentPhase === "completed" || currentPhase === "cancelled") {
-      await mgr.transition("intent_capture", `new turn: ${userMessage.slice(0, 30)}`);
-      return;
+    // 将 pre-LLM 的粗定位也收敛进 reducer（单一转移入口）。
+    // 关键的不可逆确认（plan_confirm→executing）优先走 confirm_plan 结构化按钮 + hash 校验；
+    // 此处文本路径为兼容兜底。完整 LLM 结构化意图分类为后续增强（需真 LLM e2e 验证）。
+    let intent: Intent | null;
+    if (phase === "idle" || phase === "completed" || phase === "cancelled") {
+      intent = "new_request";
+    } else if (phase === "clarifying") {
+      intent = verdict === "reject" ? "cancel" : "answer"; // 取消可退出（修复"追问无法取消"）
+    } else if (phase === "plan_confirm") {
+      intent =
+        verdict === "confirm" ? "confirm"
+        : verdict === "modify" ? "modify"
+        : verdict === "reject" ? "reject"
+        : "question"; // ambiguous → question：提问不炸方案（修复"提问炸方案"）
+    } else {
+      intent = null; // intent_capture/planning/executing：不 pre-定位，由工具事件驱动
     }
 
-    if (currentPhase === "clarifying") {
-      await mgr.transition("planning", "user responded to clarification (or defaulted)");
-      return;
-    }
-
-    if (currentPhase === "plan_confirm") {
-      if (intent === "confirm") {
-        await mgr.transition("executing", "user confirmed final plan");
-      } else if (intent === "modify") {
-        await mgr.transition("planning", "user wants to modify plan");
-      } else if (intent === "reject" || intent === "ambiguous") {
-        await mgr.transition("intent_capture", "user rejected, restart from scratch");
-      }
-      return;
+    if (intent) {
+      const planHash = intent === "confirm" ? hashOf(mgr.plan) : undefined;
+      await mgr.dispatch({ type: "USER_TURN_CLASSIFIED", intent, planHash });
     }
   }
 
@@ -355,6 +358,31 @@ export class AgentSessionWrapper {
         const followImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         await this.inner.followUp(command.message as string, followImages?.length ? followImages : undefined);
         return null;
+      }
+
+      case "confirm_plan": {
+        // 结构化确认（route-B）：带方案指纹，独立于 LLM 文本通道，防注入伪造/串版本。
+        const planHash = command.planHash as string;
+        const out = await this.planState.dispatch({ type: "USER_CONFIRMED", planHash });
+        if (out.effects.includes("warn_stale")) {
+          return { error: "PLAN_CHANGED", message: "方案已更新，请确认最新版本后再提交。" };
+        }
+        if (out.effects.includes("reject") || out.effects.includes("illegal_transition")) {
+          return { error: "NOT_IN_CONFIRM_PHASE", message: "当前不在待确认阶段，无法确认。" };
+        }
+        if (out.phase === "executing") {
+          // 控制面确认通过 → 注入 prompt 让 LLM 在 executing 相位执行预订（数据面）
+          this.lastError = null;
+          this.promptStartedAt = Date.now();
+          void withPlanState(this.planState, () =>
+            this.inner.prompt("用户已通过确认按钮确认最终方案。请立即调用 reservation_exec 执行预订，成功后调用 plan_save 完成。"),
+          ).catch((error) => {
+            const message = error instanceof Error ? error.message : String(error);
+            this.lastError = { code: "PROMPT_FAILED", message, retryable: true };
+            this.dispatchEvent({ type: "error", code: "PROMPT_FAILED", message, retryable: true });
+          });
+        }
+        return { ok: true, phase: out.phase };
       }
 
       case "get_tools": {

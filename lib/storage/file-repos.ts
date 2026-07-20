@@ -104,6 +104,11 @@ export function createFileBookingRepo(): BookingRepo {
         return [];
       }
     },
+
+    async findByIdempotencyKey(key: string): Promise<BookingOrder | null> {
+      const all = await this.listAll();
+      return all.find((o) => o.idempotencyKey === key) ?? null;
+    },
   };
 }
 
