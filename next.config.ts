@@ -17,7 +17,9 @@ const nextConfig: NextConfig = {
     const isDev = process.env.NODE_ENV !== "production";
     const csp = [
       "default-src 'self'",
-      `script-src 'self'${isDev ? " 'unsafe-eval'" : ""}`,
+      // dev(Turbopack)需要 'unsafe-eval' + 'unsafe-inline' 才能注入 HMR 引导脚本；
+      // 生产保持严格 script-src 'self'
+      `script-src 'self'${isDev ? " 'unsafe-eval' 'unsafe-inline'" : ""}`,
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "font-src 'self' data:",
