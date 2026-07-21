@@ -242,6 +242,7 @@ async function main() {
     time: "18:30",
     partySize: 4,
     userId: "smoke-test",
+    idempotencyKey: `smoke-${Date.now()}`, // 唯一键，避免幂等命中历史订单（测试隔离）
   });
   log("Order created with ORD- prefix", order.orderId.startsWith("ORD-"), order.orderId);
   log("Initial status pending/processing", ["pending", "processing"].includes(order.status));
@@ -401,11 +402,11 @@ async function main() {
   const metrics = getRecentMetrics(10);
   log("Metrics buffer has entries (>=2; guard-blocked emits none)", metrics.length >= 2, `${metrics.length} entries`);
 
-  // ─── 集成：12 工具 + 包装 + 守卫 ────────────────────────
-  section("🔌 Integration: 12 tools registered");
+  // ─── 集成：13 工具 + 包装 + 守卫 ────────────────────────
+  section("🔌 Integration: 13 tools registered");
   const { getActivityPlannerTools, TOOL_METADATA } = await import("../src/tools/activity-tools");
   const tools = getActivityPlannerTools();
-  log("12 tools registered", tools.length === 12, `${tools.length} tools`);
+  log("13 tools registered", tools.length === 13, `${tools.length} tools`);
 
   const expectedTools = [
     "intent_parse", "ask_clarification", "get_weather",

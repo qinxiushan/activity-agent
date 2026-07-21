@@ -175,10 +175,70 @@ const orderIdSchema = Type.Object({
   orderId: Type.String({ description: "订单 ID" }),
 });
 
+// route-B 改动 3：LLM 结构化意图分类（取代 advancePlanPhase 的正则）
+const classifyTurnSchema = Type.Object({
+  intent: Type.Union([
+    Type.Literal("new_request"),
+    Type.Literal("answer"),
+    Type.Literal("confirm"),
+    Type.Literal("modify"),
+    Type.Literal("reject"),
+    Type.Literal("question"),
+    Type.Literal("cancel"),
+  ], { description: "用户这一轮消息的意图分类" }),
+  confidence: Type.Number({ description: "分类置信度 0.0-1.0" }),
+  reason: Type.Optional(Type.String({ description: "简短分类理由" })),
+});
+
 // ─── 工具注册表 ──────────────────────────────────────────────────
 
 export function getActivityPlannerTools(): ToolDefinition[] {
   const baseTools: ToolDefinition[] = [
+
+    // ── 结构化意图分类（route-B 改动 3，每轮先调） ─────────
+
+    {
+      name: "classify_turn",
+      label: "classify_turn",
+      description: "分类用户这一轮消息的意图：new_request（新请求）/ answer（回答追问）/ confirm（确认方案）/ modify（修改重规划）/ reject（推翻重来）/ question（提问，不改方案）/ cancel（取消）。**在 clarifying 和 plan_confirm 阶段，每轮必须先调此工具**，再据返回的 phase 决定后续动作。confirm 置信度<0.8 时不会转移，需向用户二次确认或提示点「确认并预订」按钮。",
+      promptSnippet: "意图分类",
+      parameters: classifyTurnSchema,
+      execute: async (_id, params: Static<typeof classifyTurnSchema>) => {
+        const mgr = getActivePlanState();
+        if (!mgr) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({
+              error: true, code: "NO_ACTIVE_PLAN_STATE", message: "plan state not initialized",
+            }, null, 2) }],
+            details: { error: true },
+          };
+        }
+        const { intent, confidence } = params;
+
+        // 低置信度 + 不可逆确认 → 不猜、不转移（fail-closed），引导二次确认 / 点按钮
+        if (intent === "confirm" && confidence < 0.8) {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({
+              classified: intent, confidence, transitioned: false, phase: mgr.currentPhase,
+              note: "确认意图置信度不足，未提交预订。请向用户明确二次确认，或提示其点击「确认并预订」按钮。",
+            }, null, 2) }],
+            details: { classified: intent, confidence, transitioned: false },
+          };
+        }
+
+        // 文本确认走当前方案指纹（结构化按钮才是防注入主路径，此为文本兜底）
+        const planHash = intent === "confirm" ? hashOf(mgr.plan) : undefined;
+        const out = await mgr.dispatch({ type: "USER_TURN_CLASSIFIED", intent, planHash });
+
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({
+            classified: intent, confidence, phase: out.phase, effects: out.effects,
+            note: nextStepHint(out.phase),
+          }, null, 2) }],
+          details: { classified: intent, phase: out.phase, effects: out.effects },
+        };
+      },
+    },
 
     // ── 阶段 1：意图捕获 ───────────────────────────────────
 
@@ -743,10 +803,22 @@ function suggestFix(code: string): string {
   return suggestions[code] ?? "请检查输入参数";
 }
 
+/** classify_turn 后按新相位给 LLM 的下一步提示 */
+function nextStepHint(phase: string): string {
+  switch (phase) {
+    case "planning": return "已进入 planning：请重新调用规划工具生成方案，最后用 intent_parse(submitPlan=true) 提交。";
+    case "executing": return "已进入 executing：请立即调用 reservation_exec 执行预订，成功后调 plan_save 完成。";
+    case "intent_capture": return "已回到 intent_capture：请重新提取意图并调 intent_parse。";
+    case "plan_confirm": return "仍在 plan_confirm（如用户提问）：请回答用户，方案保持不变，等待确认。";
+    case "cancelled": return "会话已取消。";
+    default: return "";
+  }
+}
+
 export const TOOL_METADATA = {
   supportedCities: ["北京", "上海", "深圳"],
   totalPOIs: getDatabaseStats().total,
-  toolCount: 12,
+  toolCount: 13,
   workflow: [
     "intent_capture",
     "clarifying (max 1)",

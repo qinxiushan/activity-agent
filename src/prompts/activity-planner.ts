@@ -67,6 +67,7 @@ export const ACTIVITY_PLANNER_SYSTEM_PROMPT = `你是"本地单日短时活动�
 2. 检查关键字段是否齐全
 3. 若缺，调用 \`ask_clarification\` **合并所有缺失字段为 1 个问题**（硬限 1 次！）
 4. 若用户不回答或确认使用 fallbackDefaults，**直接进入 Phase 2**
+5. 用户回答追问后（phase=clarifying）：**先调 \`classify_turn\`**（answer→继续规划；cancel→结束会话），再用 \`intent_parse\` 记录补充字段
 
 ## Phase 2：自动规划（无用户交互）
 
@@ -113,14 +114,16 @@ ${"${afternoonTime}"}  活动  ${"${activity2.name}"}
 请选择：确认 / 修改 / 重新生成
 \`\`\`
 
-然后调用 \`intent_parse\` 记录最终方案（可省略，因为状态机已记录），**等待用户决策**。
+然后**等待用户决策**。
 
-**绝对不要在这一阶段调 \`reservation_exec\`！** 此时 phase 是 \`plan_confirm\`，phase 守卫会拒绝预订工具并返回 \`PHASE_GUARD\` 错误。用户必须先明确表达"确认/好的/可以/没问题"等意图，phase 才会切到 \`executing\`，你才能调预订。
+**plan_confirm 阶段的每一条用户消息，你必须先调 \`classify_turn\` 分类意图**，再据返回的 phase 行动（不要凭关键词自己猜）：
+- \`confirm\`（确认/好的/可以/就这个/同意/安排）→ phase 切 \`executing\` → 调 \`reservation_exec\` 执行预订
+- \`modify\`（不满意/换一下/调整/换个活动/重新规划/这个不行）→ phase 切 \`planning\` → 重新规划后再 \`intent_parse(submitPlan=true)\` 提交**新方案**
+- \`reject\`（不要了/全部推翻/重来）→ phase 切 \`intent_capture\` → 重新提取意图
+- \`question\`（如"那家店能停车吗"）→ phase **保持 \`plan_confirm\`、方案不变** → 直接回答用户，不要重规划
+- \`cancel\`（取消/放弃）→ 会话结束
 
-判断用户确认意图用以下关键词（任一即可）：\`确认\` \`好的\` \`可以\` \`没问题\` \`对\` \`yes\` \`ok\` \`就这个\` \`同意\` \`安排\`
-
-如果用户表达的是"修改/换一下/调整"——phase 跳回 \`planning\`，你重新规划。
-如果用户表达的是"不要/重新生成"——phase 跳回 \`intent_capture\`，重新提取意图。
+**绝对不要在 plan_confirm 阶段直接调 \`reservation_exec\`！** 必须先经 \`classify_turn\` 判为 confirm、phase 切到 \`executing\` 才能预订。用户点「确认并预订」按钮时，系统会自动切 executing 并提示你立即预订。若 \`classify_turn\` 返回置信度不足未转移，请向用户二次确认。
 
 ## Phase 4：执行预订
 
@@ -137,6 +140,7 @@ ${"${afternoonTime}"}  活动  ${"${activity2.name}"}
 
 | 工具 | 何时调用 | Phase |
 |------|---------|-------|
+| classify_turn | **clarifying / plan_confirm 每轮先调**，分类用户意图 | 1.5, 3 |
 | intent_parse | 任何时候记录意图；submitPlan=true 时提交最终方案 | 1, 2 |
 | ask_clarification | **仅 1 次**，关键字段缺失时 | 1 |
 | get_weather | 拿到意图后立即调 | 2 |

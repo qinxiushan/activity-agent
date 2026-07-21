@@ -10,8 +10,7 @@ import { cacheSessionPath } from "./session-reader";
 import type { AgentSessionLike, ToolInfo } from "./pi-types";
 import { getActivityPlannerTools, TOOL_METADATA } from "@/src/tools/activity-tools";
 import { ACTIVITY_PLANNER_SYSTEM_PROMPT } from "@/src/prompts/activity-planner";
-import { withPlanState, PlanStateManager, classifyUserConfirmation, describeWaitingFor } from "./plan-state";
-import { hashOf, type Intent } from "./plan-reducer";
+import { withPlanState, PlanStateManager, describeWaitingFor } from "./plan-state";
 import { EventAdapter } from "./event-adapter";
 import type { StandardEvent } from "./event-types";
 import { metrics } from "./metrics-registry";
@@ -186,33 +185,15 @@ export class AgentSessionWrapper {
     };
   }
 
-  private async advancePlanPhase(userMessage: string): Promise<void> {
+  private async advancePlanPhase(): Promise<void> {
     const mgr = this.planState;
     mgr.incrementTurn();
+    // 确定性引导：空闲/完成/取消 → 意图捕获（不看消息内容，任何消息都是新请求）。
+    // clarifying / plan_confirm 的意图分类改由 LLM 的 classify_turn 工具完成
+    // （route-B 改动 3：结构化意图分类取代正则 classifyUserConfirmation）。
     const phase = mgr.currentPhase;
-    const verdict = classifyUserConfirmation(userMessage); // 轻量兜底分类：confirm|reject|modify|ambiguous
-
-    // 将 pre-LLM 的粗定位也收敛进 reducer（单一转移入口）。
-    // 关键的不可逆确认（plan_confirm→executing）优先走 confirm_plan 结构化按钮 + hash 校验；
-    // 此处文本路径为兼容兜底。完整 LLM 结构化意图分类为后续增强（需真 LLM e2e 验证）。
-    let intent: Intent | null;
     if (phase === "idle" || phase === "completed" || phase === "cancelled") {
-      intent = "new_request";
-    } else if (phase === "clarifying") {
-      intent = verdict === "reject" ? "cancel" : "answer"; // 取消可退出（修复"追问无法取消"）
-    } else if (phase === "plan_confirm") {
-      intent =
-        verdict === "confirm" ? "confirm"
-        : verdict === "modify" ? "modify"
-        : verdict === "reject" ? "reject"
-        : "question"; // ambiguous → question：提问不炸方案（修复"提问炸方案"）
-    } else {
-      intent = null; // intent_capture/planning/executing：不 pre-定位，由工具事件驱动
-    }
-
-    if (intent) {
-      const planHash = intent === "confirm" ? hashOf(mgr.plan) : undefined;
-      await mgr.dispatch({ type: "USER_TURN_CLASSIFIED", intent, planHash });
+      await mgr.dispatch({ type: "USER_TURN_CLASSIFIED", intent: "new_request" });
     }
   }
 
@@ -226,7 +207,7 @@ export class AgentSessionWrapper {
         const userMessage = command.message as string;
         this.lastError = null;
         this.promptStartedAt = Date.now();
-        await this.advancePlanPhase(userMessage);
+        await this.advancePlanPhase();
         // 在 AsyncLocalStorage 作用域内运行 prompt，确保工具 execute 读到正确的 planState
         void withPlanState(
           this.planState,
