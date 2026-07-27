@@ -4,7 +4,7 @@ WORKDIR /app
 RUN apk add --no-cache libc6-compat
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 
 FROM docker.m.daocloud.io/library/node:22-alpine AS builder
 WORKDIR /app

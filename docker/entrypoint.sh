@@ -11,7 +11,6 @@ LOG
 su-exec nextjs:nodejs node <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
-const { scryptSync } = require("node:crypto");
 const { Pool } = require("pg");
 
 async function main() {
@@ -52,12 +51,17 @@ async function main() {
       }
     }
 
-    const hashPassword = (password) =>
-      scryptSync(password, "activity-agent-auth-v1", 64).toString("hex");
-
     const users = [
-      { id: "alice", username: "alice", password: "alice123" },
-      { id: "bob", username: "bob", password: "bob123" },
+      {
+        id: "alice",
+        username: "alice",
+        passwordHash: "$2b$12$YqU4WLtPI7NQHSqqoWici.RXGw35hhpmvP/PTgR2zPt.RxVc1udQ6",
+      },
+      {
+        id: "bob",
+        username: "bob",
+        passwordHash: "$2b$12$cT0aNiOAPeyoVe5z1eeBAuCoKaCBuy1d0rZg4JgsxMaooU8TBjMaG",
+      },
     ];
 
     for (const user of users) {
@@ -67,7 +71,7 @@ async function main() {
          ON CONFLICT (id) DO UPDATE SET
            username=EXCLUDED.username,
            password_hash=EXCLUDED.password_hash`,
-        [user.id, user.username, hashPassword(user.password)],
+        [user.id, user.username, user.passwordHash],
       );
     }
 
