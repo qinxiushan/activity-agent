@@ -24,6 +24,7 @@ import { setTimeout as wait } from "node:timers/promises";
 
 const SERVER_URL = process.env.E2E_SERVER ?? "http://localhost:30142";
 const HEALTHCHECK_PATH = "/api/sessions";
+const E2E_AUTH_SECRET = process.env.AUTH_SECRET ?? "e2e-dev-secret";
 const READY_TIMEOUT_MS = 60_000;
 const POLL_INTERVAL_MS = 500;
 const SHUTDOWN_GRACE_MS = 3_000;
@@ -65,7 +66,7 @@ function startDevServer(): ChildProcess {
   const child = spawn("npm", ["run", "dev"], {
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
-    env: { ...process.env, FORCE_COLOR: "1" },
+    env: { ...process.env, FORCE_COLOR: "1", AUTH_SECRET: E2E_AUTH_SECRET },
   });
 
   // Forward dev server output with a prefix, but only stderr/stdout if user wants it.
@@ -105,7 +106,7 @@ async function runTest(): Promise<number> {
   return new Promise<number>((resolve) => {
     const child = spawn("node_modules/.bin/tsx", ["scripts/e2e-real-llm-test.ts"], {
       stdio: "inherit",
-      env: { ...process.env, E2E_SERVER: SERVER_URL },
+      env: { ...process.env, E2E_SERVER: SERVER_URL, AUTH_SECRET: E2E_AUTH_SECRET },
     });
     child.on("exit", (code) => resolve(code ?? 1));
     child.on("error", (err) => {

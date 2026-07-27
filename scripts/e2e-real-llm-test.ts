@@ -47,6 +47,7 @@ const SERVER_BASE = process.env.E2E_SERVER ?? "http://localhost:30142";
 const PLAN_STATES_DIR = path.join(os.homedir(), ".pi", "agent", "plan-states");
 const SESSIONS_DIR = path.join(os.homedir(), ".pi", "agent", "sessions");
 const E2E_USER_ID = `e2e-plan-owner-${Date.now()}`;
+const E2E_USER_HEADERS = { "X-User-Id": E2E_USER_ID } as const;
 
 interface ModelEntry {
   id: string;
@@ -150,7 +151,10 @@ async function collectEvents(sessionId: string, onEvent: (e: Record<string, unkn
   const url = `${SERVER_BASE}/api/agent/${sessionId}/events`;
   (async () => {
     try {
-      const r = await fetch(url, { signal: controller.signal, headers: { Accept: "text/event-stream" } });
+      const r = await fetch(url, {
+        signal: controller.signal,
+        headers: { Accept: "text/event-stream", ...E2E_USER_HEADERS },
+      });
       if (!r.ok || !r.body) {
         console.error(`SSE: HTTP ${r.status}`);
         return;
@@ -192,7 +196,10 @@ async function waitForIdle(sessionId: string, timeoutMs: number): Promise<{ idle
   let lastStreaming = true;
   while (Date.now() - start < timeoutMs) {
     try {
-      const r = await fetch(`${SERVER_BASE}/api/agent/${sessionId}`, { signal: AbortSignal.timeout(3000) });
+      const r = await fetch(`${SERVER_BASE}/api/agent/${sessionId}`, {
+        signal: AbortSignal.timeout(3000),
+        headers: E2E_USER_HEADERS,
+      });
       if (!r.ok) {
         await sleep(500);
         continue;
@@ -202,7 +209,10 @@ async function waitForIdle(sessionId: string, timeoutMs: number): Promise<{ idle
         lastStreaming = !!(data.state.isStreaming || data.state.isCompacting);
         if (!lastStreaming) {
           await sleep(300); // grace
-          const r2 = await fetch(`${SERVER_BASE}/api/agent/${sessionId}`, { signal: AbortSignal.timeout(3000) });
+          const r2 = await fetch(`${SERVER_BASE}/api/agent/${sessionId}`, {
+            signal: AbortSignal.timeout(3000),
+            headers: E2E_USER_HEADERS,
+          });
           const data2 = await r2.json() as { running?: boolean; state?: { isStreaming?: boolean; isCompacting?: boolean } };
           if (data2.running && data2.state && !data2.state.isStreaming && !data2.state.isCompacting) {
             return { idle: true, elapsedMs: Date.now() - start };
@@ -396,7 +406,7 @@ async function main(): Promise<void> {
 
   // 步骤 1: 创建 session + 发初始 prompt
   const userPrompt = [
-    "想和女朋友周六(2026-07-11)去玩",
+    "想和女朋友周六(2026-08-01)去玩",
     "下午6点前要结束(10:00开始)",
     "人在三里屯(北京朝阳)",
     "预算300元/人",
@@ -408,7 +418,7 @@ async function main(): Promise<void> {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-User-Id": E2E_USER_ID,
+      ...E2E_USER_HEADERS,
     },
     body: JSON.stringify({
       type: "prompt",
@@ -524,7 +534,7 @@ async function main(): Promise<void> {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-User-Id": E2E_USER_ID,
+      ...E2E_USER_HEADERS,
     },
     body: JSON.stringify({ type: "prompt", message: "确认" }),
   });
@@ -629,7 +639,7 @@ async function cleanup(sessionId: string): Promise<void> {
   try {
     await fetch(`${SERVER_BASE}/api/sessions/${sessionId}`, {
       method: "DELETE",
-      headers: { "X-User-Id": E2E_USER_ID },
+      headers: E2E_USER_HEADERS,
     });
   } catch { /* best effort */ }
 }
