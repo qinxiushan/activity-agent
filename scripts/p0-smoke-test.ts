@@ -974,7 +974,9 @@ async function main() {
   const headersConfig = typeof nextConfig.headers === "function" ? await nextConfig.headers() : [];
   const rootHeaders = headersConfig.find((h) => h.source === "/:path*")?.headers ?? [];
   const headerKeys = new Set(rootHeaders.map((h) => h.key.toLowerCase()));
+  const cspHeader = rootHeaders.find((h) => h.key.toLowerCase() === "content-security-policy")?.value ?? "";
   log("security headers: CSP present", headerKeys.has("content-security-policy"));
+  log("security headers: CSP allows Next inline bootstrap", cspHeader.includes("script-src") && cspHeader.includes("'unsafe-inline'"));
   log("security headers: X-Frame-Options present", headerKeys.has("x-frame-options"));
   log("security headers: nosniff present", headerKeys.has("x-content-type-options"));
 
