@@ -13,7 +13,7 @@ export async function GET(
   const leafId = url.searchParams.get("leafId") ?? undefined;
 
   try {
-    const userContext = resolveUserContext(req);
+    const userContext = await resolveUserContext(req);
     if (!userContext.userId) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }

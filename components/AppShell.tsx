@@ -149,17 +149,6 @@ export function AppShell({
     void loadIdentity();
   }, [loadIdentity]);
 
-  const handleLogout = useCallback(async () => {
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } catch {
-      // ignore client-side logout errors and let the redirect refresh state
-    }
-    setIdentity(null);
-    router.replace("/login");
-    router.refresh();
-  }, [router]);
-
   useEffect(() => {
     if (typeof window === "undefined") return;
     const media = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`);
@@ -658,21 +647,23 @@ export function AppShell({
                 </span>
               )}
               {identity.authed && (
-                <button
-                  onClick={handleLogout}
-                  style={{
-                    height: 22,
-                    padding: "0 8px",
-                    borderRadius: 999,
-                    border: "1px solid var(--border)",
-                    background: "var(--bg-panel)",
-                    color: "var(--text-muted)",
-                    cursor: "pointer",
-                    fontSize: 10,
-                  }}
-                >
-                  退出
-                </button>
+                <form action="/api/auth/logout" method="post" style={{ margin: 0 }}>
+                  <button
+                    type="submit"
+                    style={{
+                      height: 22,
+                      padding: "0 8px",
+                      borderRadius: 999,
+                      border: "1px solid var(--border)",
+                      background: "var(--bg-panel)",
+                      color: "var(--text-muted)",
+                      cursor: "pointer",
+                      fontSize: 10,
+                    }}
+                  >
+                    退出
+                  </button>
+                </form>
               )}
               {identity.isDev && (
                 <span style={{

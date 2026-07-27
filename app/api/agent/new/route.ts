@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json() as { cwd?: string; [key: string]: unknown };
     const { cwd, ...command } = body;
-    const context = resolveUserContext(req);
+    const context = await resolveUserContext(req);
     if (!context.userId) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }

@@ -1,29 +1,41 @@
-function getErrorMessage(error?: string): string | null {
-  switch (error) {
-    case "invalid_credentials":
-      return "用户名或密码错误";
-    case "missing_credentials":
-      return "请输入用户名和密码";
-    case "auth_unavailable":
-      return "登录服务暂不可用";
-    case "invalid_json":
-      return "登录请求格式错误";
-    default:
-      return null;
+import { AuthError } from "next-auth";
+import { redirect } from "next/navigation";
+import { signIn } from "@/auth";
+
+type LoginPageProps = {
+  searchParams?: Promise<{
+    error?: string;
+    username?: string;
+  }>;
+};
+
+function getErrorMessage(error?: string | null): string | null {
+  if (!error) return null;
+  if (error === "CredentialsSignin" || error === "credentials") return "用户名或密码错误";
+  return "登录失败";
+}
+
+async function loginAction(formData: FormData): Promise<void> {
+  "use server";
+
+  const username = String(formData.get("username") ?? "");
+  try {
+    await signIn("credentials", {
+      username,
+      password: String(formData.get("password") ?? ""),
+      redirectTo: "/",
+    });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      redirect(`/login?error=CredentialsSignin&username=${encodeURIComponent(username)}`);
+    }
+    throw error;
   }
 }
 
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-}) {
+export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = await searchParams;
-  const errorParam = params?.error;
-  const usernameParam = params?.username;
-  const error = Array.isArray(errorParam) ? errorParam[0] : errorParam;
-  const username = Array.isArray(usernameParam) ? usernameParam[0] : usernameParam;
-  const errorMessage = getErrorMessage(error);
+  const error = getErrorMessage(params?.error);
 
   return (
     <main style={{
@@ -35,8 +47,7 @@ export default async function LoginPage({
       padding: 24,
     }}>
       <form
-        action="/api/auth/login"
-        method="post"
+        action={loginAction}
         style={{
           width: "100%",
           maxWidth: 360,
@@ -50,7 +61,7 @@ export default async function LoginPage({
         }}
       >
         <div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>登录</div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--text)", margin: "0 0 6px" }}>登录</h1>
           <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
             AUTH_MODE=required 下必须登录后才能访问应用。
           </div>
@@ -59,7 +70,7 @@ export default async function LoginPage({
           用户名
           <input
             name="username"
-            defaultValue={username ?? ""}
+            defaultValue={params?.username ?? ""}
             autoComplete="username"
             style={{
               height: 38,
@@ -87,8 +98,8 @@ export default async function LoginPage({
             }}
           />
         </label>
-        {errorMessage && (
-          <div style={{ fontSize: 12, color: "#ef4444" }}>{errorMessage}</div>
+        {error && (
+          <div style={{ fontSize: 12, color: "#ef4444" }}>{error}</div>
         )}
         <button
           type="submit"

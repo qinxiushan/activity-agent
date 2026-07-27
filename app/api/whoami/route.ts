@@ -4,7 +4,7 @@ import { resolveUserContext } from "@/lib/user-context";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const context = resolveUserContext(req);
+  const context = await resolveUserContext(req);
   return NextResponse.json({
     userId: context.userId,
     username: context.username,

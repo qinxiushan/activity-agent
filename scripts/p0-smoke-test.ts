@@ -38,13 +38,11 @@ import {
 import { metrics as registryMetrics } from "../lib/metrics-registry";
 import { closeRedis } from "../lib/redis";
 import {
-  createAuthSessionToken,
   hashPassword,
-  verifyAuthSessionToken,
   verifyPassword,
 } from "../lib/auth-session";
 import { canAccessOwner } from "../lib/session-ownership";
-import { resolveUserContext } from "../lib/user-context";
+import { resolveUserContextFromValues } from "../lib/user-context";
 import { buildAuditInsertPlaceholders } from "../lib/audit-logger";
 import { promises as afs } from "node:fs";
 import os from "node:os";
@@ -192,7 +190,7 @@ async function main() {
   restoreEnv("REDIS_URL", prevRedisUrl);
   await closeRedis();
 
-  // ─── T3: Auth mode + signed session ─────────────────────
+  // ─── T3: Auth mode + NextAuth session ───────────────────
   section("🔐 T3: Auth mode + session ownership");
   const prevAuthMode = process.env.AUTH_MODE;
   const prevAuthSecret = process.env.AUTH_SECRET;
@@ -203,27 +201,18 @@ async function main() {
   log("Password hash verifies correct secret", verifyPassword("alice123", passwordHash));
   log("Password hash rejects wrong secret", !verifyPassword("wrong-password", passwordHash));
 
-  const signedToken = createAuthSessionToken({
-    userId: "alice",
-    username: "alice",
-    iat: Date.now(),
+  const requiredAuthed = resolveUserContextFromValues({
+    sessionUser: { id: "alice", name: "alice" },
   });
-  const verifiedToken = verifyAuthSessionToken(signedToken);
-  log("Signed auth token round-trips", verifiedToken?.userId === "alice" && verifiedToken.username === "alice");
-  log("Tampered auth token is rejected", verifyAuthSessionToken(`${signedToken}x`) === null);
+  log("required mode accepts NextAuth session user", requiredAuthed.authed && requiredAuthed.userId === "alice");
 
-  const requiredAuthed = resolveUserContext(new Request("http://localhost/api/whoami", {
-    headers: { cookie: `pi_auth=${encodeURIComponent(signedToken)}` },
-  }));
-  log("required mode accepts signed auth cookie", requiredAuthed.authed && requiredAuthed.userId === "alice");
-
-  const requiredAnonymous = resolveUserContext(new Request("http://localhost/api/whoami"));
+  const requiredAnonymous = resolveUserContextFromValues({});
   log("required mode rejects anonymous request", requiredAnonymous.userId === null && requiredAnonymous.authed === false);
 
   process.env.AUTH_MODE = "optional";
-  const optionalDevCookie = resolveUserContext(new Request("http://localhost/api/whoami", {
-    headers: { cookie: "pi_user=dev-alice" },
-  }));
+  const optionalDevCookie = resolveUserContextFromValues({
+    legacyCookie: "dev-alice",
+  });
   log("optional mode still accepts legacy dev cookie", optionalDevCookie.userId === "dev-alice" && optionalDevCookie.isDev);
   log("required mode ownerless sessions are denied", !canAccessOwner(undefined, "alice", "required"));
   log("optional mode ownerless sessions still readable", canAccessOwner(undefined, "alice", "optional"));

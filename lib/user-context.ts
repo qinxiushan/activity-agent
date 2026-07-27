@@ -1,11 +1,8 @@
 import os from "node:os";
+import { auth } from "@/auth";
 import { DEFAULT_USER_ID } from "./user-preferences";
 import { getAuthMode, type AuthMode } from "./auth-mode";
-import { AUTH_COOKIE_NAME } from "./auth-constants";
-import {
-  readCookie,
-  verifyAuthSessionToken,
-} from "./auth-session";
+import { readCookie } from "./auth-session";
 
 function fromOS(): string {
   return os.userInfo().username || DEFAULT_USER_ID;
@@ -15,8 +12,8 @@ export function getCurrentUserId(): string {
   return fromOS();
 }
 
-export function getCurrentUserIdFromRequest(req: Request): string {
-  const context = resolveUserContext(req);
+export async function getCurrentUserIdFromRequest(req: Request): Promise<string> {
+  const context = await resolveUserContext(req);
   return context.userId ?? DEFAULT_USER_ID;
 }
 
@@ -30,22 +27,21 @@ export interface ResolvedUserContext {
 }
 
 export function resolveUserContextFromValues({
-  authToken,
+  sessionUser,
   headerUid,
   legacyCookie,
 }: {
-  authToken?: string | null;
+  sessionUser?: { id?: string | null; name?: string | null } | null;
   headerUid?: string | null;
   legacyCookie?: string | null;
 }): ResolvedUserContext {
   const mode = getAuthMode();
-  const authSession = verifyAuthSessionToken(authToken);
 
-  if (authSession) {
+  if (sessionUser?.id) {
     return {
       mode,
-      userId: authSession.userId,
-      username: authSession.username,
+      userId: sessionUser.id,
+      username: sessionUser.name ?? null,
       authed: true,
       isDev: false,
       source: "auth",
@@ -95,9 +91,10 @@ export function resolveUserContextFromValues({
   };
 }
 
-export function resolveUserContext(req: Request): ResolvedUserContext {
+export async function resolveUserContext(req: Request): Promise<ResolvedUserContext> {
+  const session = await auth().catch(() => null);
   return resolveUserContextFromValues({
-    authToken: readCookie(req, AUTH_COOKIE_NAME),
+    sessionUser: session?.user ?? null,
     headerUid: req.headers.get("x-user-id"),
     legacyCookie: readCookie(req, "pi_user"),
   });

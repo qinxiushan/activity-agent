@@ -12,7 +12,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const context = resolveUserContext(req);
+  const context = await resolveUserContext(req);
   if (!context.userId) {
     return new Response("Unauthorized", { status: 401 });
   }

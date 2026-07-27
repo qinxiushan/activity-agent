@@ -97,26 +97,20 @@ test.describe("AUTH_MODE=required acceptance", () => {
     const devLoginResult = await fetchJsonInPage<{ error?: string }>(page, "/api/dev-login");
     expect(devLoginResult.status).toBe(404);
 
-    const logoutResult = await page.evaluate(async () => {
-      const response = await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "same-origin",
-      });
-      return response.status;
-    });
-    expect(logoutResult).toBe(200);
+    await page.getByRole("button", { name: "退出" }).click();
+    await page.waitForURL(/\/login$/, { timeout: 15_000 });
     await page.goto("/");
     await page.waitForURL(/\/login$/, { timeout: 15_000 });
   });
 
-  test("rejects forged signed-session cookies", async ({ browser }) => {
+  test("rejects forged NextAuth session cookies", async ({ browser }) => {
     const context = await browser.newContext({
       baseURL: process.env.E2E_SERVER ?? "http://localhost:30142",
     });
     await context.addCookies([{
-      name: "pi_auth",
+      name: "authjs.session-token",
       value: "forged.invalid.signature",
-      domain: "localhost",
+      domain: "127.0.0.1",
       path: "/",
       httpOnly: true,
       sameSite: "Lax",

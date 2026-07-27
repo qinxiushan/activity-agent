@@ -5,8 +5,8 @@
  * PUT    /api/user-preferences       — manually edit defaults (partial)
  * POST   /api/user-preferences       — action=refresh → re-derive from history
  *
- * disabled/optional: signed auth > X-User-Id > pi_user > os.userInfo().username.
- * required: only signed auth is accepted.
+ * disabled/optional: NextAuth session > X-User-Id > pi_user > os.userInfo().username.
+ * required: only NextAuth session is accepted.
  * ?userId= or body.userId still override for explicit per-request testing.
  */
 
@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request): Promise<NextResponse> {
   const url = new URL(req.url);
-  const context = resolveUserContext(req);
+  const context = await resolveUserContext(req);
   const userId = url.searchParams.get("userId") ?? context.userId;
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -32,7 +32,7 @@ export async function GET(req: Request): Promise<NextResponse> {
 }
 
 export async function PUT(req: Request): Promise<NextResponse> {
-  const context = resolveUserContext(req);
+  const context = await resolveUserContext(req);
   let body: { userId?: string; defaults?: Partial<UserPreferencesDefaults> };
   try {
     body = (await req.json()) as typeof body;
@@ -52,7 +52,7 @@ export async function PUT(req: Request): Promise<NextResponse> {
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const context = resolveUserContext(req);
+  const context = await resolveUserContext(req);
   let body: { userId?: string; action?: string };
   try {
     body = (await req.json()) as typeof body;

@@ -22,7 +22,7 @@ export async function POST(
 
   try {
     const body = await req.json() as { type: string; [key: string]: unknown };
-    const context = resolveUserContext(req);
+    const context = await resolveUserContext(req);
     if (!context.userId) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
@@ -88,7 +88,7 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const context = resolveUserContext(req);
+    const context = await resolveUserContext(req);
     if (!context.userId) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }

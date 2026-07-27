@@ -1,15 +1,15 @@
-import { cookies, headers } from "next/headers";
+import { headers } from "next/headers";
 import { Suspense } from "react";
+import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
-import { AUTH_COOKIE_NAME } from "@/lib/auth-constants";
 import { resolveUserContextFromValues } from "@/lib/user-context";
 
 export default async function Home() {
-  const cookieStore = await cookies();
   const headerStore = await headers();
+  const session = await auth();
   const context = resolveUserContextFromValues({
-    authToken: cookieStore.get(AUTH_COOKIE_NAME)?.value ?? null,
-    legacyCookie: cookieStore.get("pi_user")?.value ?? null,
+    sessionUser: session?.user ?? null,
+    legacyCookie: headerStore.get("cookie")?.match(/(?:^|;\s*)pi_user=([^;]+)/)?.[1] ?? null,
     headerUid: headerStore.get("x-user-id"),
   });
   const initialIdentity = context.userId

@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { AUTH_COOKIE_NAME } from "@/lib/auth-constants";
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
 import { getAuthMode } from "@/lib/auth-mode";
 
 const PUBLIC_PREFIXES = [
   "/login",
-  "/api/auth/login",
-  "/api/auth/logout",
+  "/api/auth",
   "/api/health",
   "/api/health/ready",
   "/api/metrics",
@@ -17,14 +17,18 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
-export function middleware(req: NextRequest) {
+export default async function middleware(req: NextRequest) {
   const mode = getAuthMode();
   if (mode !== "required") return NextResponse.next();
 
   const { pathname } = req.nextUrl;
-  const hasAuthCookie = Boolean(req.cookies.get(AUTH_COOKIE_NAME)?.value);
+  const token = await getToken({
+    req,
+    secret: process.env.AUTH_SECRET,
+  });
+  const hasSession = Boolean(token?.sub);
 
-  if (pathname === "/login" && hasAuthCookie) {
+  if (pathname === "/login" && hasSession) {
     return NextResponse.redirect(new URL("/", req.url));
   }
 
@@ -32,7 +36,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  if (hasAuthCookie) {
+  if (hasSession) {
     return NextResponse.next();
   }
 

@@ -5,7 +5,7 @@ import { resolveUserContext } from "@/lib/user-context";
 
 export async function GET(req: Request) {
   try {
-    const context = resolveUserContext(req);
+    const context = await resolveUserContext(req);
     if (!context.userId) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }

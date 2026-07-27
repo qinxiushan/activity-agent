@@ -5,8 +5,8 @@ import { resolveUserContext } from "@/lib/user-context";
 
 const DEFAULT_ADMIN_USERS = new Set(["alice"]);
 
-function canViewAudit(req: Request): boolean {
-  const context = resolveUserContext(req);
+async function canViewAudit(req: Request): Promise<boolean> {
+  const context = await resolveUserContext(req);
   if (context.mode !== "required") return true;
   if (!context.authed || !context.username) return false;
 
@@ -21,7 +21,7 @@ function canViewAudit(req: Request): boolean {
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request): Promise<NextResponse> {
-  if (getAuthMode() === "required" && !canViewAudit(req)) {
+  if (getAuthMode() === "required" && !(await canViewAudit(req))) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
@@ -34,4 +34,3 @@ export async function GET(req: Request): Promise<NextResponse> {
     count: events.length,
   });
 }
-
