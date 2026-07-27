@@ -168,8 +168,7 @@ Browser                Next.js Server              AgentSession (in-process)
 
 ```
 app/api/
-  auth/login/route.ts            POST username/password → signed session cookie
-  auth/logout/route.ts           POST clear signed session cookie
+  auth/[...nextauth]/route.ts    NextAuth v5 Credentials endpoints
   sessions/route.ts               GET  list all sessions
   sessions/[id]/route.ts          GET/PATCH/DELETE session
   sessions/[id]/context/route.ts  GET ?leafId= — context for a specific leaf
@@ -191,9 +190,8 @@ app/
   globals.css           CSS variables (light + dark), shared styles
 
 lib/
-  auth-constants.ts        auth cookie name shared by node + edge runtime
   auth-mode.ts             disabled / optional / required auth mode parser
-  auth-session.ts          signed auth token + password verify + user lookup
+  auth-session.ts          user lookup + bcrypt password verify
   rpc-manager.ts           AgentSessionWrapper + startRpcSession
                            + advancePlanPhase (idle/completed/cancelled → intent_capture;
                                                 clarifying → planning;
