@@ -1,10 +1,10 @@
 # Activity Agent — Handoff Document
 
-> Status as of 2026-06-07. Read this before continuing the project.
+> Status as of 2026-07-29. Read this before continuing the project.
 
 ## TL;DR
 
-SOP-v2 (8-phase, 12-tool, single-confirm + 1-clarify) is **complete and verified end-to-end** against a real LLM. ~85 files, ~40k LOC. `/activity` UI page shipped with phase progress, plan timeline, tool waterfall, booking card, and user-preferences panel. **126/126 smoke + 24/24 e2e tests pass.** Cross-session user-preference memory is wired (defaults derived from history, auto-fills `intent_parse` on missing critical fields, records completed sessions). The codebase is in a good state to pause or extend.
+SOP-v2 has 23 tools. Final plan submission is token-only: `submit_plan` accepts a summary plus validation/budget tokens, then the server assembles canonical timeline and budget artifacts. Clarification defaults now fail closed unless every required question resolves. **344/344 smoke tests pass** and DeepSeek real-LLM E2E passes **60/60**, with exactly one `submit_plan` call.
 
 A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.agents/skills/phase-gated-agent/SKILL.md` (see "Reusable artifacts" below).
 
@@ -12,22 +12,25 @@ A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.a
 
 ### Backend (verified)
 - **8-phase state machine** — `lib/plan-state.ts`. `idle → intent_capture → clarifying → planning → plan_confirm → executing → completed/cancelled`. Explicit `PHASE_TRANSITIONS` DAG.
-- **12 custom activity tools** — `src/tools/activity-tools.ts`. Each wrapped with retry/timeout/metrics + phase guard.
-- **TOOL_PHASE_RULES** — strict tool-to-phase whitelist. E.g. `reservation_exec: ["executing"]` only. Wrapper returns `PHASE_GUARD` for illegal calls.
-- **submitPlan defense** — `intent_parse` body self-validates `submitPlan:true` is only legal in `planning` (layer 3 defense in depth).
-- **1-clarify hard limit** — `MAX_CLARIFICATIONS = 1`. `ask_clarification` body rejects the 2nd call.
+- **23 custom activity tools** — `src/tools/activity-tools.ts`, including token-only `submit_plan`.
+- **TOOL_PHASE_RULES** — strict tool-to-phase whitelist. For example, `commit_itinerary` is only available in `executing`; illegal calls return `PHASE_GUARD`.
+- **Canonical submit defense** — `submit_plan` is planning-only and accepts no timeline/budget object. It resolves both from server-owned artifacts by token. Legacy `intent_parse(submitPlan:true)` remains temporarily compatible but uses the same canonical path.
+- **Structured 1-clarify flow** — `MAX_CLARIFICATIONS = 1`. Defaults merge by field even for LLM-supplied questions; the UI only enables default submission when every required question has an answer or fallback.
+- **Adaptive cost resolution** — unknown ticket/dining costs no longer use fixed ¥100/¥120. `CostResolver` prefers comparable POIs, then city/category priors, then a deliberately wide fallback; every estimate carries range/source/confidence/basis.
 - **Plan state persistence** — `~/.pi/agent/plan-states/<sessionId>.json` written on every transition via a write queue.
 - **User-preference memory** — `lib/user-preferences.ts`. Per-user JSON at `~/.pi/agent/user-profiles/<userId>.json`. `autoFillIntent()` is called from `intent_parse` when critical fields (date/startTime/partySize/departurePoint/budgetPerPerson) are missing, filling them from the user's learned defaults and reporting `autoFilledFields` in the tool result so the LLM can announce the fill to the user. `recordCompletedSession()` is called from `plan_save` on phase `executing → completed`, appending to the recent-sessions ring buffer (capped at 5, de-duped by sessionId). `refreshFromHistory()` re-derives all defaults from the full plan-state directory (≥50% occurrence threshold) and recomputes favorite restaurants from the booking service.
-- **Real services** — POI database (34 entries), deterministic weather, route calculator, opening hours parser, booking state machine. All mock APIs designed for swap-in with 高德 / 和风 / 大众点评.
+- **Real-data boundary** — AMap-backed geocoding, POI search/detail, distance matrix and route comparison are selected when configured. Offline smoke tests use an explicit deterministic provider. Weather and third-party ticket/dining prices still need production providers.
 
 ### Frontend (verified)
 - **Generic pi-web shell** at `/` — 14 React components, full session management, file viewer, etc. (preexisting, untouched).
 - **Activity-specific UI** at `/activity` — NEW. 2-pane layout: chat left, activity panel right.
   - **UserPreferencesPanel** (NEW) — right-rail card above the activity panel. Shows learned defaults (人数 / 预算 / 出发地 / 偏好品类 / 饮食限制 / 氛围) as a 2-col grid, stats (方案数 · 预订数 · 上次更新), expandable recent-intents list, and Refresh / Reset buttons. Polls every 5s so the panel updates live as sessions complete.
   - **PhaseProgress** — 8-step horizontal bar with current-phase glow, completed checkmarks, status pill ("turn N · clarification M/1").
+  - **ClarificationCard** — inline Stepper for multiple questions with typed date/time/location/number/select controls, custom input and explicit defaults.
   - **PlanTimeline** — vertical timeline of plan legs (departure/transit/activity/meal icons + colors), weather summary, totals (duration/cost/legs).
   - **ToolTimeline** — waterfall of all tool calls with name/icon/args/duration, red BLOCKED badge for `PHASE_GUARD` hits.
-  - **BookingCard** — gradient-tinted order confirmation (restaurant/date/time/party/确认码/订单号), extracted from `reservation_exec` / `query_booking` results.
+  - **PlaceCandidates** — structured POI cards with rating/cost/opening-hours and allowlisted Amap/Dianping links.
+  - **BookingCard** — post-confirmation handoff card extracted from `commit_itinerary`, with ICS download, AMap navigation and dining search links. It explicitly does not claim that a reservation was made.
 - **APIs** —
   - `GET /api/plan-state/[id]` — UI's 1.5s polling.
   - `GET /api/user-preferences` — read defaults + stats.
@@ -35,15 +38,14 @@ A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.a
   - `POST /api/user-preferences` — `action=refresh|reset` for full re-derive or full clear.
 
 ### Tests (verified)
-- `scripts/p0-smoke-test.ts` — **126/126 pass** (was 94, +32 for the new `🧠 P0-5: User Preferences Store` section covering empty store, updateDefaults, autoFillIntent overwrite/no-op, recordCompletedSession de-dupe/cap, reset, refreshFromHistory with empty + populated + outlier plan-state dirs, and disk persistence). No API key needed.
+- `scripts/p0-smoke-test.ts` — **344/344 pass**, including clarification defaults, token-only canonical submission, artifact invalidation, retry limiting and legacy budget rendering compatibility. No API key needed.
 - `tests/activity-visual.spec.ts` — Playwright visual regression (light + dark + sample prompt + 7 phase labels). Now also includes 4 new tests for the `User Preferences Panel` (empty state, refresh button POST, dark mode contrast, recent-intents toggle).
-- `scripts/e2e-real-llm-test.ts` — **24/24 pass** against `deepseek/deepseek-v4-pro`. Real LLM, real booking, real confirmation code.
+- `scripts/e2e-real-llm-test.ts` — **60/60 pass** with sparse-input clarification, adaptive budget, exactly one token-only `submit_plan`, and structured confirmation.
 
 ## What's NOT done
 
 Out of scope for the current milestone:
 
-- **Real API integration** (高德/和风/大众点评) — mock services work but are deterministic. Needs API keys + ¥ + production hardening.
 - **Multi-day trip support** — current SOP is single-day. State machine would need extension.
 - **Production auth / rate limiting** — dev server only, no rate limits. v3 userId: X-User-Id header > pi_user cookie > `os.userInfo().username` (cookie set/cleared via `/api/dev-login` — NOT real auth, no password/token). For production, replace with proper auth.
 - **i18n** — UI is Chinese-only, prompt is Chinese-only.
@@ -54,7 +56,7 @@ Out of scope for the current milestone:
 
 - **`~/.agents/skills/phase-gated-agent/SKILL.md`** — Skill capturing the SOP-v2 design pattern. Use it as a starting point for any new agent that needs strict workflow enforcement. Covers: 8-phase design, 3-layer defense (TOOL_PHASE_RULES + PHASE_TRANSITIONS + tool-body self-check), persistence pattern, common pitfalls, and a quick checklist.
 
-- **`lib/plan-state.ts` + `src/tools/activity-tools.ts`** — Drop-in reference implementation. Adapt the 12 tools to your domain (replace POI/weather/booking with your domain's data + side effects), keep the phase machine.
+- **`lib/plan-state.ts` + `src/tools/activity-tools.ts`** — Drop-in reference implementation. Adapt the 23 tools to your domain while keeping the phase machine and token-only artifact handoff.
 
 - **`lib/user-preferences.ts` + `components/UserPreferencesPanel.tsx`** — Reference pattern for cross-session memory: derive defaults from history (≥50% threshold), auto-fill on intake, record on completion, expose manual refresh/reset via API. Drop-in for any SOP-driven agent that wants to reduce clarification rounds.
 
@@ -65,7 +67,11 @@ Out of scope for the current milestone:
 | What | Where |
 |---|---|
 | Phase machine | `lib/plan-state.ts` |
-| 12 tool definitions | `src/tools/activity-tools.ts` |
+| Structured clarification contract | `lib/clarification.ts` |
+| Clarification UI | `components/activity/ClarificationCard.tsx` |
+| Adaptive cost resolver | `lib/cost-resolver.ts` |
+| Budget ledger | `lib/budget-service.ts` |
+| 23 tool definitions | `src/tools/activity-tools.ts` |
 | Tool wrapper (retry/timeout/metrics) | `lib/tool-wrapper.ts` |
 | LLM prompt | `src/prompts/activity-planner.ts` |
 | Session orchestration (agent start, advancePlanPhase) | `lib/rpc-manager.ts` |
@@ -91,9 +97,9 @@ Out of scope for the current milestone:
 
 2. **The plan state file is the source of truth for the UI.** The UI polls `~/.pi/agent/plan-states/<sessionId>.json` directly. The in-memory `PlanStateManager.current` may diverge if a write is in flight. The file is always the latest *persisted* state.
 
-3. **`intent_parse(submitPlan:true)` from `plan_confirm` or `executing` is a BUG.** Not just discouraged — actively rejected. The fix is in `src/tools/activity-tools.ts` (layer 3) and `TOOL_PHASE_RULES` (layer 1). Don't relax either.
+3. **New flows must use `submit_plan`, never `intent_parse(submitPlan:true)`.** The legacy path is compatibility-only. Do not reintroduce LLM-owned copies of timeline or budgetBreakdown.
 
-4. **`reservation_exec` must NEVER be allowed in `plan_confirm`.** Original bug discovered during e2e testing — LLM would call it before user confirms. The fix is in `TOOL_PHASE_RULES.reservation_exec: ["executing"]`. Don't add `plan_confirm` to that list.
+4. **`commit_itinerary` must NEVER be allowed in `plan_confirm`.** It freezes the plan and generates delivery artifacts, so it must remain `executing`-only after the structured confirmation command.
 
 5. **`MAX_CLARIFICATIONS = 1` is HARD.** Don't raise it without rethinking the SOP — the prompt and the user experience both assume exactly one clarification round.
 
@@ -103,7 +109,7 @@ Out of scope for the current milestone:
 
 8. **`tsconfig.tsbuildinfo` is gitignored** (it's a build artifact). Delete it manually before `tsc --noEmit` if you see stale type errors.
 
-9. **The dev server is running** (pid stored in `/tmp/next-dev.log` startup, port 30142). To restart: `pkill -f "next dev" && nohup npm run dev > /tmp/next-dev.log 2>&1 &`.
+9. **Do not assume the dev server is running.** Check port 30142 before starting it; automation should use the repository's nvm-compatible interactive-shell command so it does not accidentally select Node 18.
 
 ## Test commands
 
@@ -111,12 +117,12 @@ Out of scope for the current milestone:
 # Type check
 node_modules/.bin/tsc --noEmit                # exit 0
 
-# Smoke (no API key, ~5s)
-npx tsx scripts/p0-smoke-test.ts              # 94/94 pass
+# Smoke (no API key)
+npm run test:smoke                            # 344/344 pass
 
-# E2E (real LLM, ~2 min for 2 turns)
+# E2E (real LLM; includes clarification + full plan/confirm)
 # Requires: dev server running + auth.json with API key + settings.json with default model
-npm run e2e:real                              # 24/24 pass
+npm run e2e
 ```
 
 ## Progress judgment

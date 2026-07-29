@@ -122,24 +122,34 @@ Three jobs:
 **Hard constraints:**
 
 - **Single user confirmation** at `plan_confirm` (no intermediate "is this OK?")
-- **1-clarify limit** — `ask_clarification` can be invoked at most once per session
-- **Auto-planning** — LLM calls `get_weather` / `search_*` / `check_opening_hours` / `compute_route` without user interaction
+- **1-clarify limit** — `ask_clarification` can be invoked at most once per session; it persists a typed, multi-question clarification card
+- **Auto-planning** — LLM calls weather/search/matrix/route-comparison/validation tools without user interaction
 - **Phase guard** — every tool wrapped with `guardToolCallWithActive`, illegal-phase calls return `PHASE_GUARD` error
 
-## 12 Tools (by phase)
+## 23 Tools (by phase)
 
 | Phase       | Tool                    | Role                                                                          |
 | ----------- | ----------------------- | ----------------------------------------------------------------------------- |
-| 1 intent    | `intent_parse`        | Record structured intent**OR** submit final plan (`submitPlan: true`) |
-| 1 intent    | `ask_clarification`   | 1-shot clarifying question (硬限 1)                                           |
+| 1 intent    | `intent_parse`        | Record structured intent; legacy submit fields are compatibility-only |
+| 1 intent    | `ask_clarification`   | 1-shot structured question card (Stepper/options/custom input, hard limit 1)  |
+| 1 intent    | `detect_user_region`  | City-level IP hint; never an exact departure                                  |
+| 2 planning  | `geocode`              | Resolve a named departure/end point to GCJ-02 coordinates                     |
+| 2 planning  | `reverse_geocode`      | Convert authorized GCJ-02 coordinates to an address                           |
+| 2 planning  | `search_places_text`   | Paginated city/name/keyword POI search                                        |
+| 2 planning  | `search_places_nearby` | Paginated nearby POI search with exclusions                                   |
+| 2 planning  | `get_place_details`    | Batch-enrich up to 10 searched POIs and generate trusted links                |
 | 2 planning  | `get_weather`         | Weather forecast for the day                                                  |
+| 2 planning  | `discover_place_candidates` | Multi-query pool, session exclusions, dedupe and diversity reranking     |
 | 2 planning  | `search_activities`   | Activity POI query (real DB, 22 POIs)                                         |
 | 2 planning  | `search_restaurants`  | Restaurant POI query (real DB, 12 POIs)                                       |
 | 2 planning  | `check_opening_hours` | Verify POI is open at planned time                                            |
-| 2 planning  | `compute_route`       | Transit time between POIs (auto walking/transit/driving)                      |
-| 3 execution | `reservation_exec`    | Real restaurant booking (state machine)                                       |
-| 3 execution | `query_booking`       | Check order status                                                            |
-| 3 execution | `retry_booking`       | Retry failed order                                                            |
+| 2 planning  | `compute_route`       | Backward-compatible single-leg route (four modes)                             |
+| 2 planning  | `distance_matrix`     | Real 2-8 point distance matrix + visit-order suggestion                       |
+| 2 planning  | `compare_route_options` | Compare walking/transit/driving/bicycling with honest availability/cost     |
+| 2 planning  | `validate_itinerary`  | Build timeline and enforce time/end/opening/route constraints                  |
+| 2 planning  | `calculate_budget`    | Auditable adaptive price ranges + party/per-trip cost semantics                |
+| 2 planning  | `submit_plan`         | Token-only canonical submission; server resolves timeline and budget artifacts |
+| 3 execution | `commit_itinerary`    | Freeze confirmed plan and generate ICS/navigation handoff                     |
 | persist     | `plan_save`           | Save final plan                                                               |
 | persist     | `plan_load`           | Load historical plan                                                          |
 
@@ -161,7 +171,7 @@ Browser                Next.js Server              AgentSession (in-process)
   │◀── data: {...} ─────────│                               │
 ```
 
-**Custom Tools**: 12 activity planning tools registered via `customTools` in `rpc-manager.ts`.
+**Custom Tools**: 23 activity planning tools registered via `customTools` in `rpc-manager.ts`.
 **System Prompt**: Chinese single-confirm SOP prompt from `src/prompts/activity-planner.ts`.
 
 ## File Map
@@ -199,12 +209,15 @@ lib/
                            + shutdownRpcSessions() for T4 graceful stop
   plan-state.ts            8-phase state machine, tool-phase rules,
                            getMissingCriticalFields, MAX_CLARIFICATIONS=1
+  clarification.ts         Structured question normalization + safe answer-to-intent mapping
   poi-database.ts          34 POIs (22 activities + 12 restaurants) across 北京/上海/深圳
                            + Haversine distance + 4D scoring
   booking-service.ts       Real booking state machine
                            (pending → processing → confirmed/failed → notified)
   weather-service.ts       Mock weather (deterministic by date+city hash)
   route-service.ts         Haversine + transit time (walking/transit/driving)
+  cost-resolver.ts         Exact → comparable POI → city/category prior → wide fallback ladder
+  budget-service.ts        Adaptive min/likely/max ledger + reserve strategy + budget token
   opening-hours-service.ts Parse opening hours string + open/close check
   tool-wrapper.ts          Generic retry/timeout/fallback/metrics wrapper
   user-preferences.ts      Cross-session memory: defaults derived from history,
@@ -224,7 +237,7 @@ lib/
 
 src/
   tools/
-    activity-tools.ts      12 ToolDefinitions + per-tool P0 wrappers
+    activity-tools.ts      23 ToolDefinitions + per-tool P0 wrappers
     tool-utils.ts          Response helpers
   prompts/
     activity-planner.ts    Chinese system prompt
@@ -232,10 +245,12 @@ src/
 
 components/
   activity/                Activity-specific UI (used by /activity page)
+    ClarificationCard.tsx  Multi-question Stepper with typed controls and custom input
     PhaseProgress.tsx      8-step horizontal progress with active-phase highlight
     PlanTimeline.tsx       Vertical timeline of plan legs (departure/transit/activity/meal)
     ToolTimeline.tsx       Tool call waterfall with name/icon/duration
-    BookingCard.tsx        Order confirmation card (extracted from reservation_exec result)
+    PlaceCandidates.tsx    Structured POI candidates with trusted outbound links
+    BookingCard.tsx        ICS download + navigation/dining handoff links
     ActivityPanel.tsx      Composes the four components
   UserPreferencesPanel.tsx Right-rail card showing learned defaults (party size,
                            budget, departure, …) + stats + recent sessions.
@@ -244,7 +259,7 @@ hooks/
   useActivitySession.ts    Minimal SSE + plan-state polling hook (separate from useAgentSession)
 
 scripts/
-  p0-smoke-test.ts         Unit + integration tests (269 assertions, no API)
+  p0-smoke-test.ts         Unit + integration tests (344 assertions, no API)
   e2e-real-llm-test.ts     Real LLM end-to-end test (requires API key)
                            + optional-mode X-User-Id → plan_states.user_id 断言
   e2e-auth-test.ts         Required-auth wrapper: auto-start server + run Playwright auth suite
@@ -269,13 +284,15 @@ at `/`. Goes to the URL in your dev server: [http://localhost:30142/activity](ht
 **Activity panel** (right side) shows:
 
 1. **Phase progress** — 8-step horizontal bar (idle → intent_capture → clarifying → planning → plan_confirm → executing → completed), current phase highlighted, "turn N · clarification M/1" status
-2. **Booking card** — appears in `executing`/`completed` phase, extracted from `reservation_exec` / `query_booking` results (restaurant / date / time / 确认码 / 订单号)
-3. **Plan timeline** — vertical timeline of plan legs (departure 🚌 / transit 🚇 / activity 🎯 / meal 🍴 / rest ☕), weather summary, totals (duration / cost / legs)
-4. **Tool timeline** — waterfall of all tool calls with name/icon/args/duration/BLOCKED badge for `PHASE_GUARD` hits
+2. **Clarification card** — typed multi-question Stepper with options, custom input and safe defaults
+3. **Place candidates** — diverse POI results with rating/cost/opening hours and allowlisted outbound links
+4. **Plan timeline** — vertical timeline with adaptive budget ranges and legacy-plan compatibility
+5. **Itinerary handoff card** — appears after confirmation with an ICS download and navigation/dining links; it does not claim to have booked
+6. **Tool timeline** — waterfall of all tool calls with name/icon/args/duration/BLOCKED badge for `PHASE_GUARD` hits
 
 **Why separate page**: The pi-web shell at `/` is a generic coding-agent UI. The
 `/activity` page is a vertical slice that visualizes the SOP-v2 workflow end-to-end
-(phase progress, plan, booking, tool calls), which is the actual product we're
+(phase progress, clarification, candidates, plan, itinerary handoff, tool calls), which is the actual product we're
 shipping.
 
 **Data sources**:
@@ -291,7 +308,7 @@ shipping.
 | Session log | `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl` | JSONL events  |
 | Plan state  | `~/.pi/agent/plan-states/<sessionId>.json`                    | JSON snapshot |
 
-Plan state tracks: `phase`, `turnCount`, `clarificationCount`, `intent`, `plan`, `history`.
+Plan state tracks: `phase`, `turnCount`, `clarificationCount`, `pendingClarification`, canonical validation/budget artifacts, `intent`, `plan`, `history`.
 
 ```jsonl
 {"type":"session","version":3,"id":"<uuid>","timestamp":"...","cwd":"/path","parentSession":"/abs/path"}
@@ -302,9 +319,9 @@ Plan state tracks: `phase`, `turnCount`, `clarificationCount`, `intent`, `plan`,
 
 ## Key Design Differences from pi-web
 
-- **12 custom activity tools** (vs pi-web's coding tools)
-- **Real POI database** (34 entries) replaces LLM-fabricated recommendations
-- **Real booking state machine** replaces mock reservation
+- **23 custom activity tools** (vs pi-web's coding tools)
+- **Pluggable real-data provider** uses AMap when configured and an explicit deterministic fallback for offline tests
+- **ICS + trusted-link handoff** replaces the old automatic-booking narrative
 - **Phase guard** wraps every tool to enforce workflow
 - **Tool wrapper** provides retry/timeout/fallback for resilience
 - **8-state machine** with single-confirm UX (vs 5-step confirm-each)
@@ -317,7 +334,7 @@ Plan state tracks: `phase`, `turnCount`, `clarificationCount`, `intent`, `plan`,
 
 ```bash
 npx tsx scripts/p0-smoke-test.ts
-# Expected: 90/90 pass, exit 0
+# Expected: 344/344 pass, exit 0
 ```
 
 ### Real LLM e2e (HTTP client — requires configured model + API key + running dev server)
@@ -344,18 +361,16 @@ Override server URL if needed: `E2E_SERVER=http://localhost:30142 npm run e2e:re
 
 The e2e test:
 
-1. Reads `~/.pi/agent/models.json` (first model entry)
-2. Pings `${SERVER_BASE}/api/sessions` to confirm dev server is up
-3. POSTs to `/api/agent/new` with `{ type: "prompt", cwd: <temp>, message, provider, modelId }`
-4. Opens SSE stream to `/api/agent/[id]/events`, collects `tool_execution_*` + `message_end`
-5. Polls `/api/agent/[id]` waiting for `isStreaming: false`
-6. Asserts: `intent_parse` called, at least one `search_*` called, all SOP tools called (`get_weather`, `compute_route`, `check_opening_hours`), no premature `reservation_exec`
-7. Reads `~/.pi/agent/plan-states/<sessionId>.json` to verify final phase = `plan_confirm` and all 5 critical intent fields captured
-8. POSTs to `/api/agent/[id]` with `{ type: "prompt", message: "确认" }`
-9. Waits for second turn idle
-10. Asserts: phase transitioned to `executing`, `reservation_exec` called
-11. Prints: tool call sequence, plan state history, captured intent, captured plan, assistant text snippets
-12. DELETEs `/api/sessions/[id]` to clean up
+1. Discovers the configured model through `/api/models`
+2. Uses a sparse prompt to verify the LLM emits a persisted structured clarification card
+3. POSTs a complete planning prompt to `/api/agent/new`
+4. Opens SSE and waits for the planning turn to finish
+5. Asserts candidate/details/weather/matrix/route/validation/budget tools ran, `submit_plan` ran exactly once, and no premature commit occurred
+6. Verifies adaptive budget min/likely/max ordering, strategy, source and basis
+7. Reads plan state to verify `plan_confirm` and all 5 critical intent fields
+8. POSTs a structured `confirm_plan` command with the plan hash
+9. Waits for confirmation and asserts `executing`/`completed` plus `commit_itinerary`
+10. Prints traces and cleans up both sessions
 
 Exit codes:
 
