@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DataProvider, RoutePoint } from "./data-provider";
-import type { ProposedPlan } from "./plan-state";
+import type { PlanWarning, ProposedPlan } from "./plan-state";
 import type { TransitMode } from "./route-service";
 
 export type EndPolicy = "last_poi" | "return_to_start" | "specified";
@@ -21,11 +21,7 @@ export interface ItineraryLeg {
   estimatedCost: number;
 }
 
-export interface ValidationIssue {
-  code: string;
-  message: string;
-  poiId?: string;
-}
+export type ValidationIssue = PlanWarning;
 
 export interface ItineraryValidationResult {
   valid: boolean;

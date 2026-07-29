@@ -552,6 +552,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       budgetToken: params.budgetToken,
       timeline: artifacts.timeline,
       budgetBreakdown: artifacts.budgetBreakdown,
+      warnings: artifacts.warnings,
       totalCost: artifacts.budgetBreakdown.projectedTotal,
       weather: params.weather,
     }, mgr.intent);
@@ -1200,7 +1201,14 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           bufferMinutes: params.bufferMinutes,
         });
         const mgr = getActivePlanState();
-        if (mgr) await mgr.recordItineraryValidation(result.validationToken, result.valid, result.timeline);
+        if (mgr) {
+          await mgr.recordItineraryValidation(
+            result.validationToken,
+            result.valid,
+            result.timeline,
+            result.warnings,
+          );
+        }
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
           details: result,
@@ -1385,6 +1393,7 @@ async function completeSubmittedPlan(
     validationToken?: string;
     budgetToken?: string;
     budgetBreakdown?: BudgetBreakdown;
+    warnings?: Array<{ code: string; message: string; poiId?: string }>;
     timeline: Array<{ startTime: string; endTime: string; type: "departure" | "transit" | "activity" | "meal" | "rest"; poiId?: string; poiName?: string; notes?: string }>;
     totalCost?: number;
     totalDurationMinutes?: number;
@@ -1425,6 +1434,7 @@ async function completeSubmittedPlan(
     validationToken: plan.validationToken,
     budgetToken: plan.budgetToken,
     budgetBreakdown: plan.budgetBreakdown,
+    warnings: plan.warnings,
     timeline: plan.timeline,
     totalCost,
     totalDurationMinutes,

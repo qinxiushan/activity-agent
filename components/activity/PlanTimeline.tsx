@@ -67,6 +67,20 @@ export function PlanTimeline({ planState }: { planState: ActivityPlanState | nul
         {plan.summary}
       </div>
 
+      {plan.warnings && plan.warnings.length > 0 && (
+        <div style={{
+          padding: "9px 11px", marginBottom: 12, borderRadius: 8,
+          background: "color-mix(in srgb, #f59e0b 10%, var(--bg-panel))",
+          border: "1px solid color-mix(in srgb, #f59e0b 40%, var(--border))",
+          color: "var(--text-muted)", fontSize: 10, lineHeight: 1.5,
+        }}>
+          <div style={{ color: "#f59e0b", fontWeight: 700, marginBottom: 4 }}>需要人工确认</div>
+          {plan.warnings.map((warning, index) => (
+            <div key={`${warning.code}-${warning.poiId ?? index}`}>• {warning.message}</div>
+          ))}
+        </div>
+      )}
+
       {plan.budgetBreakdown && (
         <div style={{
           padding: "10px 12px", marginBottom: 12, borderRadius: 8,

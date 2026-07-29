@@ -793,12 +793,31 @@ async function main() {
     const validationDetails = validation.details as {
       valid?: boolean;
       validationToken?: string;
-      timeline?: Array<{ startTime: string; endTime: string; type: string; poiId?: string; poiName?: string; notes?: string }>;
+      timeline?: Array<{
+        startTime: string;
+        endTime: string;
+        type: "departure" | "transit" | "activity" | "meal" | "rest";
+        poiId?: string;
+        poiName?: string;
+        notes?: string;
+      }>;
     };
     log("V3 deterministic itinerary validation succeeds", validationDetails.valid === true);
     log("V3 validator emits transit and buffer timeline",
       validationDetails.timeline?.some((entry) => entry.type === "transit") === true &&
       validationDetails.timeline?.some((entry) => entry.type === "rest") === true);
+    if (validationDetails.validationToken && validationDetails.timeline) {
+      await mgr4.recordItineraryValidation(
+        validationDetails.validationToken,
+        true,
+        validationDetails.timeline,
+        [{
+          code: "OPENING_HOURS_UNKNOWN",
+          message: "测试场馆营业时间无法自动确认",
+          poiId: "bj-001",
+        }],
+      );
+    }
     const budget = await withPlanState(mgr4, () => budgetTool.execute!("id", {
       partySize: 2,
       budgetPerPerson: 300,
@@ -845,6 +864,7 @@ async function main() {
         timeline?: unknown[];
         budgetBreakdown?: { projectedTotal?: number };
         totalCost?: number;
+        warnings?: Array<{ code?: string; message?: string }>;
       };
     };
     log("submit_plan succeeds with token-only payload",
@@ -854,6 +874,8 @@ async function main() {
     log("submit_plan assembles canonical budget server-side",
       submittedDetails.plan?.totalCost === budgetDetails.breakdown?.projectedTotal &&
       submittedDetails.plan?.budgetBreakdown?.projectedTotal === budgetDetails.breakdown?.projectedTotal);
+    log("submit_plan preserves validation warnings server-side",
+      submittedDetails.plan?.warnings?.[0]?.code === "OPENING_HOURS_UNKNOWN");
     log("Phase transitioned to plan_confirm", mgr4.currentPhase === "plan_confirm");
     await mgr4.dispatch({ type: "USER_TURN_CLASSIFIED", intent: "modify" });
     const staleAfterModify = mgr4.resolvePlanningArtifacts(

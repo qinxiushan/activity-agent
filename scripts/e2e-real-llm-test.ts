@@ -258,12 +258,16 @@ interface PlanState {
     }>;
   };
   intent: Record<string, unknown>;
+  lastItineraryValidation?: {
+    warningsJson?: string;
+  };
   plan: {
     summary: string;
     timeline: Array<{ poiId?: string; startTime: string; endTime: string; type: string }>;
     totalCost: number;
     totalDurationMinutes: number;
     weather: unknown;
+    warnings?: Array<{ code: string; message: string; poiId?: string }>;
     budgetBreakdown?: {
       minimumTotal: number;
       likelyTotal: number;
@@ -640,6 +644,12 @@ async function main(): Promise<void> {
         item.priceRange.basis.length > 0 &&
         item.priceRange.source.length > 0),
       `items=${adaptiveItems.length}`);
+    const canonicalWarnings = state1.lastItineraryValidation?.warningsJson
+      ? JSON.parse(state1.lastItineraryValidation.warningsJson) as unknown[]
+      : [];
+    ok("validation warnings persist into canonical plan",
+      JSON.stringify(state1.plan?.warnings ?? []) === JSON.stringify(canonicalWarnings),
+      `warnings=${canonicalWarnings.length}`);
   }
   const pgOwner = await readPlanStateOwnerFromPg(sessionId);
   if (pgOwner !== null) {

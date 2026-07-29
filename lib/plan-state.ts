@@ -57,6 +57,12 @@ export interface CapturedIntent {
   transportPreferences?: Array<"walking" | "transit" | "driving" | "bicycling">;
 }
 
+export interface PlanWarning {
+  code: string;
+  message: string;
+  poiId?: string;
+}
+
 export interface ProposedPlan {
   summary: string;
   validationToken?: string;
@@ -73,6 +79,8 @@ export interface ProposedPlan {
   totalCost: number;
   totalDurationMinutes: number;
   weather: { city: string; date: string; condition: string; tempMax: number; tempMin: number; advice: string };
+  /** Server-owned validation warnings that must be shown even if the LLM omits them. */
+  warnings?: PlanWarning[];
 }
 
 export interface PlanState {
@@ -89,6 +97,7 @@ export interface PlanState {
     token: string;
     valid: boolean;
     timelineJson: string;
+    warningsJson?: string;
     at: number;
   };
   lastBudgetCalculation?: {
@@ -111,6 +120,7 @@ export type CanonicalPlanningArtifacts =
       ok: true;
       timeline: ProposedPlan["timeline"];
       budgetBreakdown: BudgetBreakdown;
+      warnings: PlanWarning[];
     }
   | {
       ok: false;
@@ -281,11 +291,17 @@ export class PlanStateManager {
     }
   }
 
-  async recordItineraryValidation(token: string, valid: boolean, timeline: ProposedPlan["timeline"]): Promise<void> {
+  async recordItineraryValidation(
+    token: string,
+    valid: boolean,
+    timeline: ProposedPlan["timeline"],
+    warnings: PlanWarning[] = [],
+  ): Promise<void> {
     this.state.lastItineraryValidation = {
       token,
       valid,
       timelineJson: JSON.stringify(timeline),
+      warningsJson: JSON.stringify(warnings),
       at: Date.now(),
     };
     await this.persist();
@@ -348,8 +364,12 @@ export class PlanStateManager {
     }
     try {
       const timeline = JSON.parse(validation.timelineJson) as unknown;
+      const warnings = validation.warningsJson
+        ? JSON.parse(validation.warningsJson) as unknown
+        : [];
       const budgetBreakdown = JSON.parse(calculation.breakdownJson) as unknown;
       if (!Array.isArray(timeline) ||
+          !Array.isArray(warnings) ||
           !budgetBreakdown || typeof budgetBreakdown !== "object" ||
           typeof (budgetBreakdown as { projectedTotal?: unknown }).projectedTotal !== "number") {
         throw new Error("invalid artifact shape");
@@ -358,6 +378,7 @@ export class PlanStateManager {
         ok: true,
         timeline: timeline as ProposedPlan["timeline"],
         budgetBreakdown: budgetBreakdown as BudgetBreakdown,
+        warnings: warnings as PlanWarning[],
       };
     } catch {
       return {

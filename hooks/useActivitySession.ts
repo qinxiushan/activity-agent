@@ -30,6 +30,7 @@ export interface ActivityPlanState {
     timeline: Array<{ startTime: string; endTime: string; type: string; poiName?: string; notes?: string }>;
     totalCost: number;
     totalDurationMinutes: number;
+    warnings?: Array<{ code: string; message: string; poiId?: string }>;
     budgetBreakdown?: {
       knownTotal: number;
       estimatedTotal: number;
