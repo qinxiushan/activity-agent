@@ -1,0 +1,29 @@
+{
+  "version": "v5.1",
+  "description": "单日活动规划确定性服务评测；笛卡尔积展开为 60 个场景。",
+  "axes": {
+    "cities": ["北京", "上海", "深圳"],
+    "partySizes": [1, 2, 4, 6],
+    "budgetsPerPerson": [150, 300, 600, 1000, 2000],
+    "routePriorities": ["balanced", "fastest", "cheapest", "low_walking"],
+    "weatherConditions": ["晴", "小雨"]
+  },
+  "constraints": {
+    "date": "2026-08-01",
+    "startTime": "09:30",
+    "endTime": "18:30",
+    "endPolicy": "last_poi",
+    "activityDurationMinutes": 90,
+    "mealDurationMinutes": 75,
+    "bufferMinutes": 10,
+    "requiredRouteModes": ["walking", "transit", "driving", "bicycling"]
+  },
+  "qualityGates": {
+    "minimumScenarioCount": 60,
+    "minimumValidItineraryRate": 0.95,
+    "minimumRouteAvailabilityRate": 1,
+    "minimumBudgetInvariantRate": 1,
+    "minimumSourceDisclosureRate": 1,
+    "minimumEstimateExplanationRate": 1
+  }
+}
