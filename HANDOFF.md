@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-SOP-v2 has 23 tools. Final plan submission is token-only: `submit_plan` accepts a summary plus validation/budget tokens, then the server assembles canonical timeline and budget artifacts. Clarification defaults now fail closed unless every required question resolves. **344/344 smoke tests pass** and DeepSeek real-LLM E2E passes **60/60**, with exactly one `submit_plan` call.
+SOP-v2 has 23 tools. Final plan submission is token-only: `submit_plan` accepts a summary plus validation/budget tokens, then the server assembles canonical timeline, budget and validation-warning artifacts. Clarification defaults now fail closed unless every required question resolves. **356/356 smoke tests pass** and DeepSeek real-LLM E2E passes **61/61**, with exactly one `submit_plan` call.
 
 A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.agents/skills/phase-gated-agent/SKILL.md` (see "Reusable artifacts" below).
 
@@ -19,7 +19,8 @@ A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.a
 - **Adaptive cost resolution** — unknown ticket/dining costs no longer use fixed ¥100/¥120. `CostResolver` prefers comparable POIs, then city/category priors, then a deliberately wide fallback; every estimate carries range/source/confidence/basis.
 - **Plan state persistence** — `~/.pi/agent/plan-states/<sessionId>.json` written on every transition via a write queue.
 - **User-preference memory** — `lib/user-preferences.ts`. Per-user JSON at `~/.pi/agent/user-profiles/<userId>.json`. `autoFillIntent()` is called from `intent_parse` when critical fields (date/startTime/partySize/departurePoint/budgetPerPerson) are missing, filling them from the user's learned defaults and reporting `autoFilledFields` in the tool result so the LLM can announce the fill to the user. `recordCompletedSession()` is called from `plan_save` on phase `executing → completed`, appending to the recent-sessions ring buffer (capped at 5, de-duped by sessionId). `refreshFromHistory()` re-derives all defaults from the full plan-state directory (≥50% occurrence threshold) and recomputes favorite restaurants from the booking service.
-- **Real-data boundary** — AMap-backed geocoding, POI search/detail, distance matrix and route comparison are selected when configured. Offline smoke tests use an explicit deterministic provider. Weather and third-party ticket/dining prices still need production providers.
+- **Real-data boundary** — AMap-backed geocoding, weather, POI search/detail, distance matrix and route comparison are selected when configured. Every result exposes source/freshness/confidence/degradation metadata. Development defaults to explicit deterministic fallback; production defaults to fail-closed. Third-party ticket/dining prices still need production providers.
+- **Canonical warning defense** — itinerary validation warnings are persisted beside the timeline, copied into the canonical plan and rendered in a fixed “需要人工确认” panel. Disclosure no longer depends on the LLM wording.
 
 ### Frontend (verified)
 - **Generic pi-web shell** at `/` — 14 React components, full session management, file viewer, etc. (preexisting, untouched).
@@ -27,7 +28,7 @@ A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.a
   - **UserPreferencesPanel** (NEW) — right-rail card above the activity panel. Shows learned defaults (人数 / 预算 / 出发地 / 偏好品类 / 饮食限制 / 氛围) as a 2-col grid, stats (方案数 · 预订数 · 上次更新), expandable recent-intents list, and Refresh / Reset buttons. Polls every 5s so the panel updates live as sessions complete.
   - **PhaseProgress** — 8-step horizontal bar with current-phase glow, completed checkmarks, status pill ("turn N · clarification M/1").
   - **ClarificationCard** — inline Stepper for multiple questions with typed date/time/location/number/select controls, custom input and explicit defaults.
-  - **PlanTimeline** — vertical timeline of plan legs (departure/transit/activity/meal icons + colors), weather summary, totals (duration/cost/legs).
+  - **PlanTimeline** — vertical timeline of plan legs (departure/transit/activity/meal icons + colors), canonical validation warnings, weather summary and totals.
   - **ToolTimeline** — waterfall of all tool calls with name/icon/args/duration, red BLOCKED badge for `PHASE_GUARD` hits.
   - **PlaceCandidates** — structured POI cards with rating/cost/opening-hours and allowlisted Amap/Dianping links.
   - **BookingCard** — post-confirmation handoff card extracted from `commit_itinerary`, with ICS download, AMap navigation and dining search links. It explicitly does not claim that a reservation was made.
@@ -38,9 +39,12 @@ A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.a
   - `POST /api/user-preferences` — `action=refresh|reset` for full re-derive or full clear.
 
 ### Tests (verified)
-- `scripts/p0-smoke-test.ts` — **344/344 pass**, including clarification defaults, token-only canonical submission, artifact invalidation, retry limiting and legacy budget rendering compatibility. No API key needed.
+- `scripts/p0-smoke-test.ts` — **356/356 pass**, including data-quality provenance, clarification defaults, token-only canonical submission, warning persistence, artifact invalidation, retry limiting and legacy budget rendering compatibility. No API key needed.
+- `scripts/amap-provider-contract-test.ts` — **16/16 pass** against fixed official-response shapes without network access.
+- `scripts/v5-quality-eval.ts` + `evals/v5-service-scenarios.json` — **60/60 scenarios pass** across 3 cities × 4 party sizes × 5 budgets; evaluates itinerary validity, route availability, budget invariants, source disclosure and estimate explanation.
+- `npm run test:amap` — live acceptance passed with **42 REST calls at 100% success**, covering geocoding, weather, POI/detail, four route modes and distance matrix.
 - `tests/activity-visual.spec.ts` — Playwright visual regression (light + dark + sample prompt + 7 phase labels). Now also includes 4 new tests for the `User Preferences Panel` (empty state, refresh button POST, dark mode contrast, recent-intents toggle).
-- `scripts/e2e-real-llm-test.ts` — **60/60 pass** with sparse-input clarification, adaptive budget, exactly one token-only `submit_plan`, and structured confirmation.
+- `scripts/e2e-real-llm-test.ts` — **61/61 pass** with sparse-input clarification, adaptive budget, canonical warning equality, exactly one token-only `submit_plan`, structured confirmation and ICS handoff.
 
 ## What's NOT done
 
@@ -70,6 +74,7 @@ Out of scope for the current milestone:
 | Structured clarification contract | `lib/clarification.ts` |
 | Clarification UI | `components/activity/ClarificationCard.tsx` |
 | Adaptive cost resolver | `lib/cost-resolver.ts` |
+| External-data quality contract | `lib/data-quality.ts` |
 | Budget ledger | `lib/budget-service.ts` |
 | 23 tool definitions | `src/tools/activity-tools.ts` |
 | Tool wrapper (retry/timeout/metrics) | `lib/tool-wrapper.ts` |
@@ -85,6 +90,9 @@ Out of scope for the current milestone:
 | User-preferences panel | `components/UserPreferencesPanel.tsx` |
 | Activity session hook (SSE + poll) | `hooks/useActivitySession.ts` |
 | Smoke test | `scripts/p0-smoke-test.ts` |
+| V5 evaluation dataset | `evals/v5-service-scenarios.json` |
+| Provider contract test | `scripts/amap-provider-contract-test.ts` |
+| Planning quality evaluation | `scripts/v5-quality-eval.ts` |
 | Playwright visual test | `tests/activity-visual.spec.ts` |
 | E2E test | `scripts/e2e-real-llm-test.ts` |
 | Project knowledge base | `AGENTS.md` |
@@ -118,7 +126,10 @@ Out of scope for the current milestone:
 node_modules/.bin/tsc --noEmit                # exit 0
 
 # Smoke (no API key)
-npm run test:smoke                            # 344/344 pass
+npm run test:smoke                            # 356/356 pass
+npm run test:provider                         # 16/16 pass, no API key
+npm run eval:quality                          # 60 scenarios, no API key
+npm run test:amap                             # requires AMAP_API_KEY
 
 # E2E (real LLM; includes clarification + full plan/confirm)
 # Requires: dev server running + auth.json with API key + settings.json with default model
@@ -135,14 +146,15 @@ npm run e2e
 
 | # | Task | Value | Effort | Why |
 |---|---|---|---|---|
-| 1 | **Wire `/activity` into the main nav** at `/` | High | Low | Users can't discover the activity UI right now. Add a link in the top bar of `AppShell.tsx`. 5 lines of code. |
-| 2 | **Dark mode for `/activity`** | Medium | Low | The page already uses CSS variables; just needs `useTheme` from `hooks/useTheme.ts`. 10 lines. |
-| 3 | **Add a Playwright screenshot test** | Medium | Medium | Visual regression coverage. Requires `sudo npx playwright install chrome`. |
-| 4 | **User profile / preferences** (P1 from BUSINESS_ANALYSIS_REPORT) | High | High | Personalize the SOP — 素食 / 无烟 / 历史去过. Long-term value but significant scope. |
-| 5 | **Real API integration** (高德/和风/大众点评) | High | Very high | Productionize. Needs API keys, real-time constraints, error budgets. Multi-week. |
-| 6 | **Multi-day trip support** | Medium | High | Extend the state machine. Worth doing only if use case is real. |
+| 1 | **Build a human-labelled recommendation golden set** | High | Medium | Current 60-scenario set measures engineering correctness, not subjective relevance or personalization quality. |
+| 2 | **Integrate trusted ticket and dining price providers** | High | High | AMap does not provide complete real-time ticket/menu prices; current adaptive estimates remain explicitly uncertain. |
+| 3 | **Persist evaluation reports and trends in CI** | High | Medium | Detect quality, latency and cost regressions by commit/model instead of reading one-off console output. |
+| 4 | **Wire `/activity` into the main nav** | Medium | Low | Improve discoverability without changing the planning protocol. |
+| 5 | **Multi-day trip support** | Medium | High | Requires itinerary, budget and state-machine contract extensions. |
 
-**My recommendation: pause and ship as a v0.1 internal demo.** The 1-2-3 set is a "polish what we have" sprint (½ day). Tasks 4-6 are "build the next thing" — each is its own project.
+**Recommendation:** build the human-labelled golden set next. V5 now proves that the
+pipeline is structurally correct and externally sourced; it does not yet prove that
+users consistently prefer one recommendation over another.
 
 ## Re-opening the work
 
@@ -152,10 +164,12 @@ To resume:
 cd /home/a/chat_robot/pi_agent/activity-agent
 
 # Verify state
-git log --oneline | head -5     # should show 17 commits ending in c3b805a
-git status                      # should be clean
-node_modules/.bin/tsc --noEmit  # should exit 0
-npx tsx scripts/p0-smoke-test.ts # 94/94
+git log --oneline -5
+git status
+node_modules/.bin/tsc --noEmit
+npm run test:smoke              # 356/356
+npm run test:provider           # 16/16
+npm run eval:quality            # 60 scenarios
 
 # Restart dev server if needed
 pkill -f "next dev" 2>/dev/null

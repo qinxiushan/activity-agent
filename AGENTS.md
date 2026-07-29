@@ -215,6 +215,8 @@ lib/
   booking-service.ts       Real booking state machine
                            (pending → processing → confirmed/failed → notified)
   weather-service.ts       Mock weather (deterministic by date+city hash)
+  data-quality.ts          Unified source/freshness/confidence/degradation metadata
+                           for every external-data result
   route-service.ts         Haversine + transit time (walking/transit/driving)
   cost-resolver.ts         Exact → comparable POI → city/category prior → wide fallback ladder
   budget-service.ts        Adaptive min/likely/max ledger + reserve strategy + budget token
@@ -259,7 +261,9 @@ hooks/
   useActivitySession.ts    Minimal SSE + plan-state polling hook (separate from useAgentSession)
 
 scripts/
-  p0-smoke-test.ts         Unit + integration tests (344 assertions, no API)
+  p0-smoke-test.ts         Unit + integration tests (356 assertions, no API)
+  amap-provider-contract-test.ts  Offline AMap response/parser contract (16 assertions)
+  v5-quality-eval.ts       Deterministic 60-scenario planning quality evaluation
   e2e-real-llm-test.ts     Real LLM end-to-end test (requires API key)
                            + optional-mode X-User-Id → plan_states.user_id 断言
   e2e-auth-test.ts         Required-auth wrapper: auto-start server + run Playwright auth suite
@@ -269,6 +273,7 @@ docker/
   entrypoint.sh            Run migrations + seed users, then start standalone app
 
 Repo root:
+  evals/v5-service-scenarios.json  Auditable V5 scenario axes and quality gates
   Dockerfile               multi-stage standalone build for app container
   docker-compose.yml       full stack: app + postgres + redis
   docker-compose.dev.yml   infra-only dev stack (postgres + redis)
@@ -286,7 +291,8 @@ at `/`. Goes to the URL in your dev server: [http://localhost:30142/activity](ht
 1. **Phase progress** — 8-step horizontal bar (idle → intent_capture → clarifying → planning → plan_confirm → executing → completed), current phase highlighted, "turn N · clarification M/1" status
 2. **Clarification card** — typed multi-question Stepper with options, custom input and safe defaults
 3. **Place candidates** — diverse POI results with rating/cost/opening hours and allowlisted outbound links
-4. **Plan timeline** — vertical timeline with adaptive budget ranges and legacy-plan compatibility
+4. **Plan timeline** — vertical timeline with adaptive budget ranges, server-owned
+   validation warnings and legacy-plan compatibility
 5. **Itinerary handoff card** — appears after confirmation with an ICS download and navigation/dining links; it does not claim to have booked
 6. **Tool timeline** — waterfall of all tool calls with name/icon/args/duration/BLOCKED badge for `PHASE_GUARD` hits
 
@@ -320,7 +326,10 @@ Plan state tracks: `phase`, `turnCount`, `clarificationCount`, `pendingClarifica
 ## Key Design Differences from pi-web
 
 - **23 custom activity tools** (vs pi-web's coding tools)
-- **Pluggable real-data provider** uses AMap when configured and an explicit deterministic fallback for offline tests
+- **Pluggable real-data provider** uses AMap when configured and attaches source,
+  freshness, confidence and degradation metadata to tool results
+- **Explicit fallback policy** defaults to deterministic mock in development and
+  fail-closed in production; configure `DATA_FALLBACK_POLICY` to override
 - **ICS + trusted-link handoff** replaces the old automatic-booking narrative
 - **Phase guard** wraps every tool to enforce workflow
 - **Tool wrapper** provides retry/timeout/fallback for resilience
@@ -334,7 +343,24 @@ Plan state tracks: `phase`, `turnCount`, `clarificationCount`, `pendingClarifica
 
 ```bash
 npx tsx scripts/p0-smoke-test.ts
-# Expected: 344/344 pass, exit 0
+# Expected: 356/356 pass, exit 0
+```
+
+### V5 deterministic quality gates (no API key)
+
+```bash
+npm run test:provider
+# Expected: 16/16 pass
+
+npm run eval:quality
+# Expected: 60 scenarios, all declared quality gates pass
+```
+
+### Real AMap acceptance (requires AMAP_API_KEY)
+
+```bash
+npm run test:amap
+# Exercises geocoding, weather, POI/detail, four route modes and distance matrix
 ```
 
 ### Real LLM e2e (HTTP client — requires configured model + API key + running dev server)
