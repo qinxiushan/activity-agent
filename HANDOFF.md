@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-SOP-v2 has 23 tools. Final plan submission is token-only: `submit_plan` accepts a summary plus validation/budget tokens, then the server assembles canonical timeline, budget and validation-warning artifacts. Clarification defaults now fail closed unless every required question resolves. **356/356 smoke tests pass** and DeepSeek real-LLM E2E passes **61/61**, with exactly one `submit_plan` call. Eval V1 now adds a versioned 20-scenario Agent regression suite, deterministic hard graders, replayable data boundaries and a public-HTTP real-model runner.
+SOP-v2 has 23 tools. Final plan submission is token-only: `submit_plan` accepts a summary plus validation/budget tokens, then the server assembles canonical timeline, budget and validation-warning artifacts. Clarification defaults now fail closed unless every required question resolves. **356/356 smoke tests pass** and DeepSeek real-LLM E2E passes **61/61**, with exactly one `submit_plan` call. Eval V1 provides deterministic workflow regression; Eval V2 now provides blind pairwise review, position-debiased LLM Judge and human/Judge calibration without treating seed labels as human gold.
 
 A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.agents/skills/phase-gated-agent/SKILL.md` (see "Reusable artifacts" below).
 
@@ -44,6 +44,9 @@ A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.a
 - `scripts/v5-quality-eval.ts` + `evals/v5-service-scenarios.json` — **60/60 scenarios pass** across 3 cities × 4 party sizes × 5 budgets; evaluates itinerary validity, route availability, budget invariants, source disclosure and estimate explanation.
 - `scripts/eval-v1-contract-test.ts` + `evals/datasets/agent-regression-v1.json` — **37/37 contract assertions pass** over 20 scenarios covering complete plans, one-shot clarification, structured confirmation and historical regressions.
 - `scripts/eval-agent-v1.ts` — real Agent runner over public HTTP APIs. First DeepSeek V4 Flash sample passed **20/20**, completed in 81.551 seconds with 27 tool calls, and emitted a machine-readable report.
+- `scripts/eval-v2-contract-test.ts` + `evals/datasets/preference-seed-v2.json` — **32/32 assertions pass** over 12 cross-city preference pairs. Labels remain explicitly `seed`.
+- `scripts/eval-review-v2.ts` — creates blinded left/right packets and a separate private mapping manifest, then validates and applies completed reviews.
+- `scripts/eval-judge-v2.ts` — judges A/B and B/A, abstains on position disagreement, and reports coverage, exact agreement, macro-F1, Cohen's kappa, position consistency and confusion matrix. First DeepSeek V4 Flash pair completed with consistent `winner=a`, confidence 1.
 - `npm run test:amap` — live acceptance passed with **42 REST calls at 100% success**, covering geocoding, weather, POI/detail, four route modes and distance matrix.
 - `tests/activity-visual.spec.ts` — Playwright visual regression (light + dark + sample prompt + 7 phase labels). Now also includes 4 new tests for the `User Preferences Panel` (empty state, refresh button POST, dark mode contrast, recent-intents toggle).
 - `scripts/e2e-real-llm-test.ts` — **61/61 pass** with sparse-input clarification, adaptive budget, canonical warning equality, exactly one token-only `submit_plan`, structured confirmation and ICS handoff.
@@ -98,6 +101,9 @@ Out of scope for the current milestone:
 | Eval V1 contracts and graders | `lib/eval/` |
 | Eval V1 Agent dataset | `evals/datasets/agent-regression-v1.json` |
 | Eval V1 real-model runner | `scripts/eval-agent-v1.ts` |
+| Eval V2 preference core | `lib/eval/preference-*.ts`, `lib/eval/pairwise-judge.ts` |
+| Eval V2 seed pairs | `evals/datasets/preference-seed-v2.json` |
+| Eval V2 review / Judge CLIs | `scripts/eval-review-v2.ts`, `scripts/eval-judge-v2.ts` |
 | Playwright visual test | `tests/activity-visual.spec.ts` |
 | E2E test | `scripts/e2e-real-llm-test.ts` |
 | Project knowledge base | `AGENTS.md` |
@@ -135,6 +141,7 @@ npm run test:smoke                            # 356/356 pass
 npm run test:provider                         # 16/16 pass, no API key
 npm run eval:quality                          # 60 scenarios, no API key
 npm run test:eval:v1                          # 37/37 pass, no API key
+npm run test:eval:v2                          # 32/32 pass, no API key
 npm run test:amap                             # requires AMAP_API_KEY
 
 # E2E (real LLM; includes clarification + full plan/confirm)
@@ -143,6 +150,10 @@ npm run e2e
 
 # Eval V1 real Agent dataset runner (server must already be running)
 npm run eval:agent:v1 -- --limit 1 --output /tmp/eval-v1-report.json
+
+# Eval V2: blind review and real pairwise Judge
+npm run eval:review:v2 -- --mode create --output-dir /tmp/eval-v2-review
+npm run eval:judge:v2 -- --limit 1 --output /tmp/eval-v2-judge.json
 ```
 
 ## Progress judgment
@@ -155,15 +166,16 @@ npm run eval:agent:v1 -- --limit 1 --output /tmp/eval-v1-report.json
 
 | # | Task | Value | Effort | Why |
 |---|---|---|---|---|
-| 1 | **Build Eval V2 human preference layer** | High | Medium | V1 hard gates prove workflow correctness, but do not yet measure whether users prefer one valid recommendation over another. |
+| 1 | **Collect reviewed preference gold** | High | Medium | V2 mechanics are complete, but the 12 pilot labels are deliberately seed-only until humans complete blind review. |
 | 2 | **Integrate trusted ticket and dining price providers** | High | High | AMap does not provide complete real-time ticket/menu prices; current adaptive estimates remain explicitly uncertain. |
 | 3 | **Persist evaluation reports and trends in CI** | High | Medium | Detect quality, latency and cost regressions by commit/model instead of reading one-off console output. |
-| 4 | **Wire `/activity` into the main nav** | Medium | Low | Improve discoverability without changing the planning protocol. |
-| 5 | **Multi-day trip support** | Medium | High | Requires itinerary, budget and state-machine contract extensions. |
+| 4 | **Add multi-annotator adjudication** | High | Medium | Measure inter-annotator agreement and resolve disputed pairs before calling them gold. |
+| 5 | **Wire `/activity` into the main nav** | Medium | Low | Improve discoverability without changing the planning protocol. |
+| 6 | **Multi-day trip support** | Medium | High | Requires itinerary, budget and state-machine contract extensions. |
 
-**Recommendation:** build Eval V2 next: create a human-labelled pairwise preference
-set, calibrate an LLM judge against it, and keep those subjective scores diagnostic
-until judge/human agreement is demonstrated.
+**Recommendation:** run the V2 blind-review workflow with at least two independent
+reviewers. Keep Judge thresholds diagnostic until there are at least 10 reviewed
+gold pairs and agreement has been measured; then add adjudication for disagreements.
 
 ## Re-opening the work
 
@@ -180,6 +192,7 @@ npm run test:smoke              # 356/356
 npm run test:provider           # 16/16
 npm run eval:quality            # 60 scenarios
 npm run test:eval:v1            # 37/37
+npm run test:eval:v2            # 32/32
 
 # Restart dev server if needed
 pkill -f "next dev" 2>/dev/null

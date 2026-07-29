@@ -20,6 +20,8 @@ docker compose up -d --build # app + postgres + redis + prometheus + grafana
 | Unit + integration smoke (no API key)             | `npm run test:smoke`             |
 | Eval V1 contract (no API key)                     | `npm run test:eval:v1`           |
 | Eval V1 real Agent (server must be running)       | `npm run eval:agent:v1`          |
+| Eval V2 preference contract (no API key)          | `npm run test:eval:v2`           |
+| Eval V2 blind review / real Judge                 | `npm run eval:review:v2` / `npm run eval:judge:v2` |
 | Real LLM e2e — one-shot (auto-starts dev server) | `npm run e2e`                    |
 | Real LLM e2e — manual (server must be running)   | `npm run e2e:real`               |
 | Required-auth e2e                                | `npm run e2e:auth`               |
@@ -72,7 +74,7 @@ Three jobs:
 
 | Job            | Triggers                          | Needs secrets          | What it runs                              | Timeout |
 | -------------- | --------------------------------- | ---------------------- | ----------------------------------------- | ------- |
-| **lint** | every push + PR                   | ❌                     | `tsc --noEmit` + smoke + Eval V1 contract | 5 min   |
+| **lint** | every push + PR                   | ❌                     | `tsc --noEmit` + smoke + Eval V1/V2 contracts | 5 min   |
 | **auth-e2e** | every push + PR                | ❌                     | required-auth Playwright (`npm run e2e:auth`) | 10 min |
 | **e2e**  | push to`main` + manual dispatch | ✅`DEEPSEEK_API_KEY` | full LLM e2e（PG + Redis services, `AUTH_MODE=optional`） | 10 min  |
 
@@ -268,6 +270,10 @@ lib/eval/
   replay-data-provider.ts  Ordered external-data replay with explicit fallback
   http-agent-driver.ts     Public-HTTP real Agent driver; no hidden CoT access
   graders/                 Outcome, constraint and trajectory hard graders
+  preference-types.ts      Pairwise samples, provenance, Judge and review contracts
+  pairwise-judge.ts        Strict JSON parser + A/B position-debiased judging
+  preference-review.ts     Blind packet/private manifest generation and apply
+  preference-calibration.ts Coverage, macro-F1, Cohen kappa and confusion matrix
 
 scripts/
   p0-smoke-test.ts         Unit + integration tests (356 assertions, no API)
@@ -275,6 +281,10 @@ scripts/
   v5-quality-eval.ts       Deterministic 60-scenario planning quality evaluation
   eval-v1-contract-test.ts Eval V1 dataset/replay/grader contract (37 assertions)
   eval-agent-v1.ts         Real Agent dataset runner + JSON metrics report
+  eval-v2-contract-test.ts Eval V2 preference contract (32 assertions)
+  eval-review-v2.ts        Blind human-review packet create/apply CLI
+  eval-judge-v2.ts         Real pairwise Judge + calibration report
+  eval/pi-judge-worker.mjs Native ESM worker for the import-only pi SDK
   e2e-real-llm-test.ts     Real LLM end-to-end test (requires API key)
                            + optional-mode X-User-Id → plan_states.user_id 断言
   e2e-auth-test.ts         Required-auth wrapper: auto-start server + run Playwright auth suite
@@ -286,6 +296,7 @@ docker/
 Repo root:
   evals/v5-service-scenarios.json  Auditable V5 scenario axes and quality gates
   evals/datasets/agent-regression-v1.json  20 versioned Agent regression scenarios
+  evals/datasets/preference-seed-v2.json   12 blind-review seed pairs (not human gold)
   evals/fixtures/mock-v1.json      Replay fixture/fallback policy
   Dockerfile               multi-stage standalone build for app container
   docker-compose.yml       full stack: app + postgres + redis
@@ -383,6 +394,31 @@ npm run eval:agent:v1 -- --repetitions 1
 Eval V1 scores only observable messages, tool calls/results and persisted plan state;
 it never reads hidden chain-of-thought. The real runner reports hard success rate,
 pass@k, latency, tool-call count and failure-code distribution.
+
+### Eval V2 preference quality
+
+```bash
+npm run test:eval:v2
+# Expected: 32/32 pass; runs in CI without an API key
+
+# Create a blind review packet and a separate private mapping manifest
+npm run eval:review:v2 -- --mode create --output-dir /tmp/eval-v2-review
+
+# After completing every packet item, map left/right labels back to a reviewed dataset
+npm run eval:review:v2 -- --mode apply \
+  --packet /path/review.packet.json \
+  --manifest /path/review.manifest.json \
+  --annotator reviewer-id \
+  --output /path/preference-reviewed-v2.json
+
+# Two model calls per pair: A/B then B/A
+npm run eval:judge:v2 -- --limit 1 --output /tmp/eval-v2-judge.json
+```
+
+V2 treats candidate text as untrusted data and accepts a verdict only when the two
+position-swapped judgments agree after label mapping; otherwise it abstains. Seed
+labels are diagnostic only. Formal coverage/agreement/F1/kappa calibration excludes
+all `seed` examples and requires reviewed/adjudicated provenance.
 
 ### Real AMap acceptance (requires AMAP_API_KEY)
 
