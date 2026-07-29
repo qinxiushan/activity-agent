@@ -53,7 +53,9 @@ export class MockDataProvider implements DataProvider {
     };
   }
 
-  async getWeather(city: string, date: string): Promise<WeatherForecast> { return getWeather(city, date); }
+  async getWeather(city: string, date: string): Promise<WeatherForecast> {
+    return { ...getWeather(city, date), source: "mock" };
+  }
 
   async geocode(address: string, city?: string): Promise<GeocodeResult> {
     const resolvedCity = city ?? address;

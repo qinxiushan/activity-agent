@@ -30,6 +30,7 @@ import { computeRoute, buildRouteChain, haversineMeters } from "../lib/route-ser
 import { BudgetService } from "../lib/budget-service";
 import { hasAdaptivePriceRange, inferCostPriorKey } from "../lib/cost-resolver";
 import { MockDataProvider } from "../lib/mock-data-provider";
+import { assessDataQuality, attachFallbackQuality } from "../lib/data-quality";
 import { isOpenAt, parseHoursString } from "../lib/opening-hours-service";
 import { UserPreferencesStore, DEFAULT_USER_ID, type UserPreferencesDefaults, type UserPreferences } from "../lib/user-preferences";
 import {
@@ -120,6 +121,29 @@ async function main() {
   log("Has temp range", w.tempMax > w.tempMin, `${w.tempMin}–${w.tempMax}°C`);
   log("Has advice string", w.advice.length > 0, w.advice);
   log("Has suitableForOutdoor", typeof w.suitableForOutdoor === "boolean");
+
+  section("V5 Data Quality Contract");
+  const mockWeatherQuality = assessDataQuality("weather", w, "mock");
+  log("Mock weather is explicitly synthetic", mockWeatherQuality.freshness === "synthetic");
+  log("Mock weather reports its real source", mockWeatherQuality.actualSource === "mock");
+  const liveWeatherWithMissingFacts = {
+    ...w,
+    precipitation: null,
+    windSpeed: null,
+    source: "amap" as const,
+  };
+  const liveWeatherQuality = assessDataQuality("weather", liveWeatherWithMissingFacts, "amap");
+  log("Unknown live weather fields stay missing", liveWeatherQuality.missingFields.join(",") === "precipitation,windSpeed");
+  log("Incomplete live data does not claim high confidence", liveWeatherQuality.confidence === "medium");
+  const degradedWeather = attachFallbackQuality(
+    "weather",
+    { ...w, source: "mock" as const },
+    "amap",
+    new Error("upstream timeout"),
+  );
+  const degradedQuality = assessDataQuality("weather", degradedWeather, "amap");
+  log("AMap fallback is marked degraded", degradedQuality.degraded && degradedQuality.actualSource === "mock");
+  log("AMap fallback preserves failure reason", degradedQuality.degradationReason === "upstream timeout");
 
   // ─── V2：候选池去重与多样性重排 ───────────────────────
   section("V2 Candidate Discovery");

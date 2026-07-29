@@ -15,10 +15,13 @@ export interface WeatherForecast {
   description: string;
   tempMax: number;
   tempMin: number;
-  precipitation: number;
-  windSpeed: number;
+  /** 百分比；数据源未提供时必须为 null，不能伪造为 0。 */
+  precipitation: number | null;
+  /** km/h；数据源未提供时必须为 null，不能伪造为 0。 */
+  windSpeed: number | null;
   advice: string;
   suitableForOutdoor: boolean;
+  source?: "mock" | "amap";
 }
 
 const CONDITION_POOL: WeatherCondition[] = ["sunny", "cloudy", "rainy", "sunny", "cloudy", "hot", "sunny", "rainy", "cloudy", "snowy"];
@@ -68,6 +71,7 @@ function generateWeather(city: string, date: string): WeatherForecast {
     windSpeed,
     advice: advicePool.length > 0 ? advicePool.join("；") : "天气适宜出行",
     suitableForOutdoor: meta.outdoor,
+    source: "mock",
   };
 }
 

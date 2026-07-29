@@ -71,6 +71,15 @@ function categoryOf(typecode = ""): ProviderPoi["category"] {
   return "cultural";
 }
 
+function weatherConditionOf(value: string, tempMax: number): WeatherForecast["condition"] {
+  if (/雪/.test(value)) return "snowy";
+  if (/雨|雷|冰雹/.test(value)) return "rainy";
+  if (Number.isFinite(tempMax) && tempMax >= 35) return "hot";
+  if (Number.isFinite(tempMax) && tempMax <= 5) return "cold";
+  if (/晴/.test(value)) return "sunny";
+  return "cloudy";
+}
+
 export class AmapDataProvider implements DataProvider {
   readonly kind = "amap" as const;
   private readonly poiCache = new Map<string, ProviderPoi>();
@@ -246,11 +255,12 @@ export class AmapDataProvider implements DataProvider {
     const tempMin = Number(cast.nighttemp);
     const suitableForOutdoor = !/雨|雪|暴雨|台风|霾|沙尘/.test(condition) && Number.isFinite(tempMax) && tempMax < 35;
     return {
-      city, date: cast.date || date, condition: condition as WeatherForecast["condition"], description: condition,
+      city, date: cast.date || date, condition: weatherConditionOf(condition, tempMax), description: condition,
       tempMax: Number.isFinite(tempMax) ? tempMax : 0, tempMin: Number.isFinite(tempMin) ? tempMin : 0,
-      precipitation: 0, windSpeed: 0,
+      precipitation: null, windSpeed: null,
       advice: suitableForOutdoor ? "天气适宜出行" : "建议优先选择室内活动，并关注实时天气",
       suitableForOutdoor,
+      source: "amap",
     };
   }
 
