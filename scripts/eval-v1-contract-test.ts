@@ -208,6 +208,29 @@ async function main(): Promise<void> {
       grade.failureCodes.join(", "));
   }
 
+  const shanghaiScenario = dataset.find((item) => item.id === "complete-shanghai-friends")!;
+  const cityPrefixedRun = passingRun(shanghaiScenario);
+  cityPrefixedRun.finalState!.intent!.departurePoint = {
+    name: "上海人民广场",
+    city: "上海市",
+  };
+  ok("intent matcher accepts a same-city place prefix",
+    gradeEvalRun(shanghaiScenario, cityPrefixedRun).hardPassed);
+  const wrongCityRun = structuredClone(cityPrefixedRun);
+  wrongCityRun.finalState!.intent!.departurePoint = {
+    name: "北京人民广场",
+    city: "北京",
+  };
+  ok("intent matcher rejects the same place name in another city",
+    gradeEvalRun(shanghaiScenario, wrongCityRun).failureCodes.includes("OUTCOME_REQUIRED_INTENT"));
+  const differentPlaceRun = structuredClone(cityPrefixedRun);
+  differentPlaceRun.finalState!.intent!.departurePoint = {
+    name: "上海科技馆",
+    city: "上海",
+  };
+  ok("intent matcher rejects a different place in the same city",
+    gradeEvalRun(shanghaiScenario, differentPlaceRun).failureCodes.includes("OUTCOME_REQUIRED_INTENT"));
+
   const harnessScenario: EvalScenario = {
     id: "harness-confirm",
     version: "1",
