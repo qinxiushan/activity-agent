@@ -40,6 +40,9 @@ jobs:
       - name: Eval V1 deterministic contract
         run: npm run test:eval:v1
 
+      - name: Eval V2 preference contract
+        run: npm run test:eval:v2
+
   # ─────────────────────────────────────────────────────────────────────
   # Job 2: Real LLM E2E (slow, needs API key, main-only + manual)
   #
