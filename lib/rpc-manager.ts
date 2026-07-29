@@ -10,7 +10,7 @@ import { cacheSessionPath } from "./session-reader";
 import type { AgentSessionLike, ToolInfo } from "./pi-types";
 import { getActivityPlannerTools, TOOL_METADATA } from "@/src/tools/activity-tools";
 import { ACTIVITY_PLANNER_SYSTEM_PROMPT } from "@/src/prompts/activity-planner";
-import { withPlanState, PlanStateManager, describeWaitingFor } from "./plan-state";
+import { withPlanState, PlanStateManager, describeWaitingFor, type PlanRuntimeContext } from "./plan-state";
 import { EventAdapter } from "./event-adapter";
 import type { StandardEvent } from "./event-types";
 import { metrics } from "./metrics-registry";
@@ -352,11 +352,11 @@ export class AgentSessionWrapper {
           return { error: "NOT_IN_CONFIRM_PHASE", message: "当前不在待确认阶段，无法确认。" };
         }
         if (out.phase === "executing") {
-          // 控制面确认通过 → 注入 prompt 让 LLM 在 executing 相位执行预订（数据面）
+          // 控制面确认通过 → 注入 prompt 让 LLM 在 executing 相位交付行程。
           this.lastError = null;
           this.promptStartedAt = Date.now();
           void withPlanState(this.planState, () =>
-            this.inner.prompt("用户已通过确认按钮确认最终方案。请立即调用 reservation_exec 执行预订，成功后调用 plan_save 完成。"),
+            this.inner.prompt(`用户已通过确认按钮确认最终方案。请立即调用 commit_itinerary，参数 planHash 为 ${planHash}，生成并交付 .ics 行程；成功后调用 plan_save 完成。禁止声称已订位或返回确认码。`),
           ).catch((error) => {
             const message = error instanceof Error ? error.message : String(error);
             this.lastError = { code: "PROMPT_FAILED", message, retryable: true };
@@ -364,6 +364,31 @@ export class AgentSessionWrapper {
           });
         }
         return { ok: true, phase: out.phase };
+      }
+
+      case "clarification_response": {
+        const clarificationId = typeof command.clarificationId === "string" ? command.clarificationId : "";
+        const answers = command.answers && typeof command.answers === "object" && !Array.isArray(command.answers)
+          ? command.answers as Record<string, unknown>
+          : {};
+        const result = await this.planState.answerClarification(clarificationId, answers);
+        if (!result.ok) {
+          return { error: "INVALID_CLARIFICATION_RESPONSE", message: result.error };
+        }
+        this.lastError = null;
+        this.promptStartedAt = Date.now();
+        const intentSnapshot = JSON.stringify(result.intent);
+        void withPlanState(this.planState, () =>
+          this.inner.prompt(
+            `用户已通过结构化追问卡片补全信息，答案已由服务端校验并写入 intent：${intentSnapshot}。` +
+            `当前 phase=planning。不要再次追问或重复调用 intent_parse 记录这些字段；请直接开始自动规划。`,
+          ),
+        ).catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          this.lastError = { code: "PROMPT_FAILED", message, retryable: true };
+          this.dispatchEvent({ type: "error", code: "PROMPT_FAILED", message, retryable: true });
+        });
+        return { ok: true, phase: result.phase, intent: result.intent };
       }
 
       case "get_tools": {
@@ -493,12 +518,16 @@ export async function startRpcSession(
   sessionFile: string,
   cwd: string,
   userId?: string,
+  runtimeContext: PlanRuntimeContext = {},
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
   const registry = getRegistry();
   const locks = getLocks();
 
   const existing = registry.get(sessionId);
-  if (existing?.isAlive()) return { session: existing, realSessionId: sessionId };
+  if (existing?.isAlive()) {
+    existing.planState.updateRuntimeContext(runtimeContext);
+    return { session: existing, realSessionId: sessionId };
+  }
 
   const inflight = locks.get(sessionId);
   if (inflight) return inflight;
@@ -527,7 +556,7 @@ export async function startRpcSession(
     const realSessionFile = inner.sessionFile as string | undefined;
     if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile);
 
-    const planState = await PlanStateManager.load(realSessionId, undefined, userId);
+    const planState = await PlanStateManager.load(realSessionId, undefined, userId, runtimeContext);
     if (userId && planState.userId !== userId) {
       await planState.setUserId(userId);
     }

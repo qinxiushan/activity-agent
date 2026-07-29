@@ -12,6 +12,8 @@
     "e2e": "tsx scripts/e2e-with-server.ts",
     "e2e:auth": "tsx scripts/e2e-auth-test.ts",
     "test:visual": "playwright test",
+    "eval:candidates": "tsx scripts/candidate-diversity-eval.ts",
+    "eval:routes": "tsx scripts/v3-route-eval.ts",
     "db:migrate": "tsx scripts/db-migrate.ts",
     "seed:users": "tsx scripts/seed-users.ts",
     "infra:up": "docker compose -f docker-compose.dev.yml up -d --wait",

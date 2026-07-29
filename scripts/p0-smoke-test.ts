@@ -7,7 +7,7 @@
  * - P0-3: 8-阶段状态机（单次确认 + 1-次追问）
  * - P0-4: 工具包装（重试 + 降级）
  * - 新服务: weather / route / opening-hours
- * - 集成: 12 工具 + 包装 + 守卫
+ * - 集成: 23 工具 + 包装 + 守卫
  *
  * 跑法：npx tsx scripts/p0-smoke-test.ts
  */
@@ -27,6 +27,9 @@ import {
 import { wrapToolWithResilience, getRecentMetrics, clearMetrics, recordToolMetric } from "../lib/tool-wrapper";
 import { getWeather } from "../lib/weather-service";
 import { computeRoute, buildRouteChain, haversineMeters } from "../lib/route-service";
+import { BudgetService } from "../lib/budget-service";
+import { hasAdaptivePriceRange, inferCostPriorKey } from "../lib/cost-resolver";
+import { MockDataProvider } from "../lib/mock-data-provider";
 import { isOpenAt, parseHoursString } from "../lib/opening-hours-service";
 import { UserPreferencesStore, DEFAULT_USER_ID, type UserPreferencesDefaults, type UserPreferences } from "../lib/user-preferences";
 import {
@@ -48,6 +51,17 @@ import { promises as afs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import {
+  mergeCandidateInputs,
+  rankCandidatePool,
+  type CandidateInput,
+} from "../lib/candidate-discovery";
+import type { ProviderPoi } from "../lib/data-provider";
+import {
+  applyClarificationAnswers,
+  canSubmitClarificationWithDefaults,
+  normalizeClarification,
+} from "../lib/clarification";
 
 let pass = 0;
 let fail = 0;
@@ -107,6 +121,53 @@ async function main() {
   log("Has advice string", w.advice.length > 0, w.advice);
   log("Has suitableForOutdoor", typeof w.suitableForOutdoor === "boolean");
 
+  // ─── V2：候选池去重与多样性重排 ───────────────────────
+  section("V2 Candidate Discovery");
+  const candidatePoi = (
+    id: string,
+    name: string,
+    category: ProviderPoi["category"],
+    lng: number,
+    lat: number,
+    typecode: string,
+  ): ProviderPoi => ({
+    id, name, city: "北京", district: "朝阳", lng, lat, category,
+    rating: 4.5, pricePerPerson: category === "dining" ? 100 : null,
+    avgDurationHours: null, openingHours: "09:00-18:00",
+    address: "测试地址", typecode, tags: [typecode, category],
+    description: `${name} 测试地点`, source: "mock",
+  });
+  const museum = candidatePoi("v2-a", "城市艺术中心", "cultural", 116.4500, 39.9300, "140100");
+  const museumAlias = candidatePoi("v2-b", "城市艺术中心", "cultural", 116.4505, 39.9305, "140100");
+  const park = candidatePoi("v2-c", "河滨公园", "outdoor", 116.4700, 39.9400, "110100");
+  const mall = candidatePoi("v2-d", "创意商场", "shopping", 116.4300, 39.9200, "060100");
+  const excludedPoi = candidatePoi("v2-x", "旧方案地点", "entertainment", 116.4600, 39.9350, "080100");
+  const candidateInputs: CandidateInput[] = [
+    { poi: museum, keyword: "艺术", mode: "text" },
+    { poi: museum, keyword: "展览", mode: "nearby" },
+    { poi: museumAlias, keyword: "艺术", mode: "nearby" },
+    { poi: park, keyword: "公园", mode: "text" },
+    { poi: mall, keyword: "创意", mode: "nearby" },
+    { poi: excludedPoi, keyword: "娱乐", mode: "text" },
+  ];
+  const mergedCandidates = mergeCandidateInputs(candidateInputs, ["v2-x"]);
+  log("V2 excludes previous-plan POIs", mergedCandidates.metrics.excludedCount === 1);
+  log("V2 merges duplicate POI IDs", mergedCandidates.metrics.duplicateByIdCount === 1);
+  log("V2 removes same-name nearby duplicates", mergedCandidates.metrics.nearDuplicateCount === 1);
+  log("V2 unique pool has 3 candidates", mergedCandidates.candidates.length === 3);
+  const rankedCandidates = rankCandidatePool(mergedCandidates.candidates, {
+    city: "北京",
+    center: { lng: 116.45, lat: 39.93 },
+    keywords: ["艺术", "展览", "公园", "创意"],
+    candidateCount: 3,
+    diversityWeight: 0.8,
+  });
+  log("V2 rank returns requested candidate count", rankedCandidates.length === 3);
+  log("V2 ranking keeps unique IDs", new Set(rankedCandidates.map((candidate) => candidate.poi.id)).size === rankedCandidates.length);
+  log("V2 ranking exposes relevance/diversity scores", rankedCandidates.every((candidate) =>
+    Number.isFinite(candidate.relevanceScore) && Number.isFinite(candidate.diversityScore)));
+  log("V2 ranking preserves multiple categories", new Set(rankedCandidates.map((candidate) => candidate.poi.category)).size >= 2);
+
   // ─── 新服务：通勤 ─────────────────────────────────────
   section("Route Service");
   const from = { id: "departure", name: "三里屯", lng: 116.453, lat: 39.937 };
@@ -133,6 +194,71 @@ async function main() {
 
   const direct = haversineMeters({ lng: 116.4, lat: 39.9 }, { lng: 116.5, lat: 39.9 });
   log("Haversine direct distance", direct > 8000 && direct < 12000, `${Math.round(direct)}m`);
+
+  section("V4 Budget Ledger");
+  log("Legacy budget item without priceRange remains render-safe",
+    !hasAdaptivePriceRange(undefined));
+  log("Adaptive budget range guard accepts valid range",
+    hasAdaptivePriceRange({ low: 10, high: 30 }));
+  const museumWithTheatreMetadata = {
+    id: "museum-regression", name: "广东省博物馆", city: "广州", district: "天河区",
+    lng: 113.32, lat: 23.12, category: "cultural" as const, rating: 4.8,
+    pricePerPerson: null, avgDurationHours: null, openingHours: null,
+    tags: ["科教文化服务;博物馆;博物馆"], description: "馆内设有剧场和临时展厅", source: "amap" as const,
+  };
+  log("Museum identity takes precedence over theatre metadata",
+    inferCostPriorKey(museumWithTheatreMetadata, false) === "public_museum");
+  const unknownPriceProvider = new MockDataProvider();
+  const originalGetPoi = unknownPriceProvider.getPoiById.bind(unknownPriceProvider);
+  unknownPriceProvider.getPoiById = async (id: string) => {
+    const poi = await originalGetPoi(id);
+    return poi ? { ...poi, pricePerPerson: null } : undefined;
+  };
+  const unknownBudget = await new BudgetService(unknownPriceProvider).calculate({
+    partySize: 2,
+    budgetPerPerson: 300,
+    stops: [
+      { poiId: "bj-001", type: "activity" },
+      { poiId: "bj-r-003", type: "meal" },
+    ],
+    legs: [
+      { fromId: "start", toId: "bj-001", mode: "transit", estimatedCost: 3, costConfidence: "exact" },
+      { fromId: "bj-001", toId: "bj-r-003", mode: "driving", estimatedCost: 12, costConfidence: "estimate" },
+    ],
+  });
+  const conservativeBudget = await new BudgetService(unknownPriceProvider).calculate({
+    partySize: 2,
+    budgetPerPerson: 300,
+    reserveStrategy: "conservative",
+    stops: [
+      { poiId: "bj-001", type: "activity" },
+      { poiId: "bj-r-003", type: "meal" },
+    ],
+    legs: [
+      { fromId: "start", toId: "bj-001", mode: "transit", estimatedCost: 3, costConfidence: "exact" },
+      { fromId: "bj-001", toId: "bj-r-003", mode: "driving", estimatedCost: 12, costConfidence: "estimate" },
+    ],
+  });
+  log("Adaptive resolver replaces fixed 100/120 reserves",
+    unknownBudget.breakdown.items
+      .filter((item) => !item.originalPriceKnown)
+      .every((item) => item.source === "comparable_pois" ||
+        item.source === "category_prior" || item.source === "generic_fallback") &&
+    unknownBudget.breakdown.items
+      .filter((item) => !item.originalPriceKnown)
+      .some((item) => item.priceRange.planningReserve !== 100 && item.priceRange.planningReserve !== 120));
+  log("V4 transit is per-person while driving is per-trip",
+    unknownBudget.breakdown.knownTotal === 6 && unknownBudget.breakdown.estimatedTotal > 12);
+  log("Unknown original prices expose ranges and basis",
+    unknownBudget.breakdown.items.filter((item) => !item.originalPriceKnown)
+      .every((item) => item.priceRange.low <= item.priceRange.likely &&
+        item.priceRange.likely <= item.priceRange.high && !!item.priceRange.basis));
+  log("Conservative strategy never reserves less than balanced",
+    conservativeBudget.breakdown.projectedTotal >= unknownBudget.breakdown.projectedTotal);
+  log("V4 total range is ordered",
+    unknownBudget.breakdown.minimumTotal <= unknownBudget.breakdown.likelyTotal &&
+    unknownBudget.breakdown.likelyTotal <= unknownBudget.breakdown.maximumTotal);
+  log("V4 budget token is deterministic", unknownBudget.budgetToken.length === 16);
 
   // ─── 新服务：营业时间 ──────────────────────────────────
   section("🕐 Opening Hours Service");
@@ -273,17 +399,29 @@ async function main() {
   log("intent_parse allowed in clarifying", isToolAllowedInPhase("intent_parse", "clarifying"));
   log("intent_parse allowed in planning (for plan submit)", isToolAllowedInPhase("intent_parse", "planning"));
   log("ask_clarification allowed in intent_capture", isToolAllowedInPhase("ask_clarification", "intent_capture"));
+  log("submit_plan allowed in planning", isToolAllowedInPhase("submit_plan", "planning"));
+  log("submit_plan BLOCKED before planning", !isToolAllowedInPhase("submit_plan", "intent_capture"));
+  log("submit_plan BLOCKED after submission", !isToolAllowedInPhase("submit_plan", "plan_confirm"));
   log("ask_clarification BLOCKED in clarifying (1-次硬限)", !isToolAllowedInPhase("ask_clarification", "clarifying"));
   log("ask_clarification BLOCKED in planning", !isToolAllowedInPhase("ask_clarification", "planning"));
   log("get_weather allowed in planning", isToolAllowedInPhase("get_weather", "planning"));
+  log("detect_user_region allowed in intent_capture", isToolAllowedInPhase("detect_user_region", "intent_capture"));
+  log("search_places_text allowed in planning", isToolAllowedInPhase("search_places_text", "planning"));
+  log("discover_place_candidates allowed in planning", isToolAllowedInPhase("discover_place_candidates", "planning"));
+  log("discover_place_candidates BLOCKED in plan_confirm", !isToolAllowedInPhase("discover_place_candidates", "plan_confirm"));
+  log("distance_matrix allowed in planning", isToolAllowedInPhase("distance_matrix", "planning"));
+  log("compare_route_options allowed in planning", isToolAllowedInPhase("compare_route_options", "planning"));
+  log("validate_itinerary BLOCKED in plan_confirm", !isToolAllowedInPhase("validate_itinerary", "plan_confirm"));
+  log("calculate_budget allowed in planning", isToolAllowedInPhase("calculate_budget", "planning"));
+  log("calculate_budget BLOCKED in plan_confirm", !isToolAllowedInPhase("calculate_budget", "plan_confirm"));
+  log("search_places_nearby BLOCKED in intent_capture", !isToolAllowedInPhase("search_places_nearby", "intent_capture"));
+  log("get_place_details allowed in plan_confirm for read-only questions", isToolAllowedInPhase("get_place_details", "plan_confirm"));
   log("search_activities BLOCKED in intent_capture", !isToolAllowedInPhase("search_activities", "intent_capture"));
   log("search_activities allowed in planning", isToolAllowedInPhase("search_activities", "planning"));
-  log("reservation_exec BLOCKED in plan_confirm (SOP-v2: 必须等用户确认)", !isToolAllowedInPhase("reservation_exec", "plan_confirm"));
-  log("reservation_exec allowed in executing (user confirmed)", isToolAllowedInPhase("reservation_exec", "executing"));
-  log("reservation_exec BLOCKED in planning", !isToolAllowedInPhase("reservation_exec", "planning"));
-  log("reservation_exec BLOCKED in intent_capture", !isToolAllowedInPhase("reservation_exec", "intent_capture"));
-  log("retry_booking BLOCKED in plan_confirm (SOP-v2: 必须等用户确认)", !isToolAllowedInPhase("retry_booking", "plan_confirm"));
-  log("retry_booking allowed in executing", isToolAllowedInPhase("retry_booking", "executing"));
+  log("commit_itinerary BLOCKED in plan_confirm (SOP-v2: 必须等用户确认)", !isToolAllowedInPhase("commit_itinerary", "plan_confirm"));
+  log("commit_itinerary allowed in executing (user confirmed)", isToolAllowedInPhase("commit_itinerary", "executing"));
+  log("commit_itinerary BLOCKED in planning", !isToolAllowedInPhase("commit_itinerary", "planning"));
+  log("commit_itinerary BLOCKED in intent_capture", !isToolAllowedInPhase("commit_itinerary", "intent_capture"));
 
   // 完整流程：idle → intent_capture → planning → plan_confirm → executing → completed
   const t1 = await mgr.transition("intent_capture", "user input");
@@ -334,8 +472,8 @@ async function main() {
   log("Classify '不要'", classifyUserConfirmation("不要") === "reject");
   log("Classify '我想去公园'", classifyUserConfirmation("我想去公园") === "ambiguous");
 
-  const guardActive = mgr3.guardToolCall("reservation_exec");
-  log("Guard reservation_exec in intent_capture blocked", !guardActive.allowed);
+  const guardActive = mgr3.guardToolCall("commit_itinerary");
+  log("Guard commit_itinerary in intent_capture blocked", !guardActive.allowed);
 
   // ─── P0-4: Tool Wrapper ─────────────────────────────────
   section("🛡️ P0-4: Tool Wrapper");
@@ -377,7 +515,7 @@ async function main() {
   log("Fallback result returned", (r2.details as { fallback: boolean })?.fallback === true);
 
   const guardableTool: ToolDefinition = {
-    name: "reservation_exec", label: "reservation_exec", description: "test",
+    name: "commit_itinerary", label: "commit_itinerary", description: "test",
     parameters: { type: "object", properties: {} } as never,
     execute: async () => ({ content: [{ type: "text", text: "ok" }], details: { ok: true } }),
   };
@@ -391,91 +529,308 @@ async function main() {
   const metrics = getRecentMetrics(10);
   log("Metrics buffer has entries (>=2; guard-blocked emits none)", metrics.length >= 2, `${metrics.length} entries`);
 
-  // ─── 集成：13 工具 + 包装 + 守卫 ────────────────────────
-  section("🔌 Integration: 13 tools registered");
+  // ─── 集成：23 工具 + 包装 + 守卫 ────────────────────────
+  section("🔌 Integration: 23 tools registered");
   const { getActivityPlannerTools, TOOL_METADATA } = await import("../src/tools/activity-tools");
   const tools = getActivityPlannerTools();
-  log("13 tools registered", tools.length === 13, `${tools.length} tools`);
+  log("23 tools registered", tools.length === 23, `${tools.length} tools`);
+
+  const { extractTrustedClientIp } = await import("../lib/client-ip");
+  const oldTrustProxyHeaders = process.env.TRUST_PROXY_HEADERS;
+  delete process.env.TRUST_PROXY_HEADERS;
+  log("Client IP headers ignored unless proxy trust is explicit",
+    extractTrustedClientIp(new Request("http://localhost", { headers: { "x-forwarded-for": "8.8.8.8" } })) === undefined);
+  process.env.TRUST_PROXY_HEADERS = "true";
+  log("Private client IP rejected",
+    extractTrustedClientIp(new Request("http://localhost", { headers: { "x-real-ip": "192.168.1.5" } })) === undefined);
+  log("Trusted public client IP accepted",
+    extractTrustedClientIp(new Request("http://localhost", { headers: { "x-forwarded-for": "8.8.8.8, 10.0.0.1" } })) === "8.8.8.8");
+  restoreEnv("TRUST_PROXY_HEADERS", oldTrustProxyHeaders);
 
   const expectedTools = [
-    "intent_parse", "ask_clarification", "get_weather",
+    "classify_turn", "intent_parse", "submit_plan", "ask_clarification", "detect_user_region",
+    "geocode", "reverse_geocode", "get_weather",
+    "discover_place_candidates", "search_places_text", "search_places_nearby", "get_place_details",
     "search_activities", "search_restaurants", "check_opening_hours", "compute_route",
-    "reservation_exec", "query_booking", "retry_booking",
+    "compare_route_options", "distance_matrix", "validate_itinerary",
+    "calculate_budget",
+    "commit_itinerary",
     "plan_save", "plan_load",
   ];
   const toolNames = tools.map((t) => t.name).sort();
   const expectedSorted = [...expectedTools].sort();
   const allPresent = expectedSorted.every((n) => toolNames.includes(n));
-  log("All 12 expected tools present", allPresent, toolNames.join(", "));
+  log("All expected tools present", allPresent, toolNames.join(", "));
 
   log("All tools have name + label", tools.every((t) => t.name && t.label));
   log("All tools have execute fn", tools.every((t) => typeof t.execute === "function"));
 
+  const regionTool = tools.find((t) => t.name === "detect_user_region");
+  if (regionTool) {
+    const mgrRegion = new PlanStateManager("smoke-ip-unavailable");
+    await mgrRegion.transition("intent_capture", "start");
+    const regionResult = await withPlanState(mgrRegion, () =>
+      regionTool.execute!("id", {}, undefined, undefined, {} as never));
+    log("IP location is honest when no trusted public IP",
+      (regionResult.details as { available?: boolean; canUseAsExactDeparture?: boolean })?.available === false &&
+      (regionResult.details as { canUseAsExactDeparture?: boolean })?.canUseAsExactDeparture === false);
+  }
+
+  const textSearchTool = tools.find((t) => t.name === "search_places_text");
+  const detailTool = tools.find((t) => t.name === "get_place_details");
+  if (textSearchTool && detailTool) {
+    const mgrSearch = new PlanStateManager("smoke-v1-search");
+    await mgrSearch.transition("intent_capture", "start");
+    await mgrSearch.transition("planning", "ready");
+    const searchResult = await withPlanState(mgrSearch, () =>
+      textSearchTool.execute!("id", { keywords: ["故宫"], city: "北京", pageSize: 20 }, undefined, undefined, {} as never));
+    const pois = (searchResult.details as { pois?: Array<{ id: string; links?: { amapPlace?: string } }> })?.pois ?? [];
+    log("V1 text search returns structured POIs", pois.length > 0);
+    log("V1 search generates allowlisted Amap links", pois.every((poi) => poi.links?.amapPlace?.startsWith("https://uri.amap.com/")));
+    const detailResult = await withPlanState(mgrSearch, () =>
+      detailTool.execute!("id", { poiIds: pois.slice(0, 2).map((poi) => poi.id) }, undefined, undefined, {} as never));
+    log("V1 detail lookup is batched", (detailResult.details as { found?: number })?.found === Math.min(2, pois.length));
+  }
+
+  const discoverTool = tools.find((t) => t.name === "discover_place_candidates");
+  if (discoverTool) {
+    const mgrDiscover = new PlanStateManager("smoke-v2-discovery");
+    await mgrDiscover.transition("intent_capture", "start");
+    await mgrDiscover.transition("planning", "ready");
+    await mgrDiscover.dispatch({
+      type: "PLAN_SUBMITTED",
+      plan: {
+        summary: "旧方案",
+        timeline: [
+          { startTime: "10:00", endTime: "11:00", type: "activity", poiId: "bj-005", poiName: "故宫" },
+        ],
+        totalCost: 0,
+        totalDurationMinutes: 60,
+        weather: { city: "北京", date: "2026-08-01", condition: "晴", tempMax: 30, tempMin: 20, advice: "适宜出行" },
+      },
+    });
+    await mgrDiscover.dispatch({ type: "USER_TURN_CLASSIFIED", intent: "modify" });
+    const discoveryResult = await withPlanState(mgrDiscover, () =>
+      discoverTool.execute!("id", {
+        city: "北京",
+        center: { lng: 116.45, lat: 39.93 },
+        keywords: ["故宫", "公园"],
+        category: "activity",
+        candidateCount: 8,
+      }, undefined, undefined, {} as never));
+    const discoveryDetails = discoveryResult.details as {
+      candidates?: Array<{ id: string }>;
+      appliedExclusions?: string[];
+      metrics?: { queryCount?: number; uniqueCandidateCount?: number; maxTypeGroupShare?: number };
+    };
+    log("V2 submitted plan POI persisted in recommendation history", mgrDiscover.recommendedPoiIds.includes("bj-005"));
+    log("V2 tool auto-applies session exclusions", discoveryDetails.appliedExclusions?.includes("bj-005") === true);
+    log("V2 tool never returns excluded previous-plan POI", discoveryDetails.candidates?.every((candidate) => candidate.id !== "bj-005") === true);
+    log("V2 tool performs multi-query discovery", (discoveryDetails.metrics?.queryCount ?? 0) >= 2);
+    const maxTypeGroupShare = discoveryDetails.metrics?.maxTypeGroupShare;
+    log("V2 tool reports type-group concentration (sparse pools may relax cap)",
+      maxTypeGroupShare !== undefined && maxTypeGroupShare > 0 && maxTypeGroupShare <= 1);
+  }
+
   const askTool = tools.find((t) => t.name === "ask_clarification");
   log("ask_clarification found", !!askTool);
+  const fallbackClarification = normalizeClarification({
+    missingFields: ["startTime", "budgetPerPerson"],
+    questions: [
+      {
+        id: "start_time", field: "startTime", type: "time",
+        title: "几点出发？", required: true, fallbackValue: "09:00",
+      },
+      {
+        id: "budget", field: "budgetPerPerson", type: "number",
+        title: "人均预算多少？", required: true,
+      },
+    ],
+    fallbackDefaults: { budgetPerPerson: 200 },
+  });
+  log("fallbackDefaults merge into LLM-supplied questions",
+    fallbackClarification.questions.find((question) => question.id === "budget")?.fallbackValue === 200);
+  log("Default submission is allowed when every required field resolves",
+    canSubmitClarificationWithDefaults(fallbackClarification.questions, {}));
+  log("Default submission is blocked when any required field cannot resolve",
+    !canSubmitClarificationWithDefaults([
+      {
+        id: "budget_without_default", field: "budgetPerPerson", type: "number",
+        title: "人均预算多少？", required: true,
+      },
+    ], {}));
+  const fallbackApplied = applyClarificationAnswers(fallbackClarification, {});
+  log("All required clarification defaults can be applied safely",
+    fallbackApplied.intent.startTime === "09:00" && fallbackApplied.intent.budgetPerPerson === 200);
   if (askTool) {
     const mgrAsk = new PlanStateManager("smoke-ask-1");
     await mgrAsk.transition("intent_capture", "start");
+    mgrAsk.recordIntent({
+      startTime: "10:00",
+      departurePoint: { name: "三里屯", city: "北京" },
+      partySize: 2,
+      budgetPerPerson: 300,
+    });
     const r4 = await withPlanState(mgrAsk, () => askTool.execute!("id", { missingFields: ["date"], question: "What date?" }, undefined, undefined, {} as never));
     log("1st ask_clarification succeeded", (r4.details as { asked?: boolean })?.asked === true);
-    const r5 = await withPlanState(mgrAsk, () => askTool.execute!("id", { missingFields: ["time"], question: "What time?" }, undefined, undefined, {} as never));
+    log("Structured clarification persisted in PlanState",
+      mgrAsk.pendingClarification?.status === "pending" &&
+      mgrAsk.pendingClarification.questions[0]?.type === "date");
+    const clarificationId = mgrAsk.pendingClarification?.id ?? "";
+    const answerResult = await mgrAsk.answerClarification(clarificationId, { date: "2026-08-01" });
+    log("Structured clarification answer enters planning", answerResult.ok && mgrAsk.currentPhase === "planning");
+    log("Structured clarification writes intent without LLM re-parse", mgrAsk.intent.date === "2026-08-01");
+    log("Answered clarification is persisted as answered", mgrAsk.pendingClarification?.status === "answered");
+    const replayResult = await mgrAsk.answerClarification(clarificationId, { date: "2026-08-02" });
+    log("Clarification replay is rejected", replayResult.ok === false);
+    const r5 = await withPlanState(mgrAsk, () => askTool.execute!("id", { missingFields: ["date"], question: "What date?" }, undefined, undefined, {} as never));
     const blockedCode = (r5.details as { code?: string })?.code;
     log("2nd ask_clarification BLOCKED (PHASE_GUARD or MAX)", blockedCode === "PHASE_GUARD" || blockedCode === "MAX_CLARIFICATIONS_EXCEEDED", blockedCode ?? "");
   }
 
   // 验证 intent_parse 的 plan submit
   const ipTool = tools.find((t) => t.name === "intent_parse");
-  if (ipTool) {
+  const compareTool = tools.find((t) => t.name === "compare_route_options");
+  const matrixTool = tools.find((t) => t.name === "distance_matrix");
+  const validateTool = tools.find((t) => t.name === "validate_itinerary");
+  const budgetTool = tools.find((t) => t.name === "calculate_budget");
+  const submitTool = tools.find((t) => t.name === "submit_plan");
+  if (ipTool && compareTool && matrixTool && validateTool && budgetTool && submitTool) {
     const mgr4 = new PlanStateManager("smoke-submit");
     await mgr4.transition("intent_capture", "start");
     await mgr4.transition("planning", "all fields ok");
-    const r6 = await withPlanState(mgr4, () => ipTool.execute!("id", {
-      submitPlan: true,
-      plan: {
-        summary: "颐和园 + 鼎泰丰",
-        timeline: [
-          { startTime: "10:00", endTime: "13:00", type: "activity", poiId: "bj-001", poiName: "颐和园" },
-          { startTime: "13:30", endTime: "14:30", type: "meal", poiId: "bj-r-003", poiName: "鼎泰丰" },
-        ],
-        totalCost: 180, totalDurationMinutes: 270,
-        weather: { city: "北京", date: "2026-07-15", condition: "sunny", tempMax: 32, tempMin: 22, advice: "适合户外" },
-      },
+    const start = { id: "start", name: "颐和园东门附近", city: "北京", lng: 116.28, lat: 39.995 };
+    const matrixResult = await withPlanState(mgr4, () => matrixTool.execute!("id", {
+      points: [start, { id: "bj-001", poiId: "bj-001" }, { id: "bj-r-003", poiId: "bj-r-003" }],
+      mode: "driving",
+      startId: "start",
     }, undefined, undefined, {} as never));
-    log("intent_parse with submitPlan succeeded", (r6.details as { planSubmitted?: boolean })?.planSubmitted === true);
+    log("V3 distance matrix returns suggested order",
+      (matrixResult.details as { suggestedOrder?: string[] }).suggestedOrder?.[0] === "start");
+    const comparison = await withPlanState(mgr4, () => compareTool.execute!("id", {
+      from: start,
+      to: { id: "bj-001", poiId: "bj-001" },
+      modes: ["walking", "transit", "driving", "bicycling"],
+      priority: "balanced",
+      weatherCondition: "晴",
+    }, undefined, undefined, {} as never));
+    const comparisonDetails = comparison.details as {
+      options?: Array<{ available: boolean }>;
+      recommendedMode?: string;
+    };
+    log("V3 compares all four route modes", comparisonDetails.options?.length === 4);
+    log("V3 route comparison recommends an available mode", !!comparisonDetails.recommendedMode);
+
+    const validation = await withPlanState(mgr4, () => validateTool.execute!("id", {
+      date: "2026-07-15",
+      startTime: "10:00",
+      endTime: "15:00",
+      start,
+      endPolicy: "last_poi",
+      stops: [{ poiId: "bj-001", type: "activity", durationMinutes: 120 }],
+      legs: [{
+        fromId: "start", toId: "bj-001", mode: "walking",
+        distanceMeters: 900, durationMinutes: 12, estimatedCost: 0,
+      }],
+      bufferMinutes: 10,
+    }, undefined, undefined, {} as never));
+    const validationDetails = validation.details as {
+      valid?: boolean;
+      validationToken?: string;
+      timeline?: Array<{ startTime: string; endTime: string; type: string; poiId?: string; poiName?: string; notes?: string }>;
+    };
+    log("V3 deterministic itinerary validation succeeds", validationDetails.valid === true);
+    log("V3 validator emits transit and buffer timeline",
+      validationDetails.timeline?.some((entry) => entry.type === "transit") === true &&
+      validationDetails.timeline?.some((entry) => entry.type === "rest") === true);
+    const budget = await withPlanState(mgr4, () => budgetTool.execute!("id", {
+      partySize: 2,
+      budgetPerPerson: 300,
+      stops: [{ poiId: "bj-001", type: "activity" }],
+      legs: [{
+        fromId: "start", toId: "bj-001", mode: "walking",
+        estimatedCost: 0, costConfidence: "exact",
+      }],
+    }, undefined, undefined, {} as never));
+    const budgetDetails = budget.details as {
+      budgetToken?: string;
+      breakdown?: {
+        knownTotal: number;
+        estimatedTotal: number;
+        reserveTotal: number;
+        projectedTotal: number;
+        projectedPerPerson: number;
+        status: string;
+        items: unknown[];
+      };
+    };
+    log("V4 known activity price multiplies by party size", budgetDetails.breakdown?.knownTotal === 60);
+    log("V4 budget reports total and per-person consistently",
+      budgetDetails.breakdown?.projectedTotal === 60 && budgetDetails.breakdown?.projectedPerPerson === 30);
+    log("V4 budget status is within limit", budgetDetails.breakdown?.status === "within");
+    const badSubmit = await withPlanState(mgr4, () => submitTool.execute!("id", {
+      summary: "颐和园",
+      validationToken: validationDetails.validationToken,
+      budgetToken: "stale-budget-token",
+    }, undefined, undefined, {} as never));
+    log("submit_plan reports the exact stale artifact",
+      (badSubmit.details as { code?: string })?.code === "BUDGET_TOKEN_INVALID");
+    log("failed submit_plan stays in planning", mgr4.currentPhase === "planning");
+
+    const r6 = await withPlanState(mgr4, () => submitTool.execute!("id", {
+      summary: "颐和园",
+      validationToken: validationDetails.validationToken,
+      budgetToken: budgetDetails.budgetToken,
+    }, undefined, undefined, {} as never));
+    const submittedDetails = r6.details as {
+      planSubmitted?: boolean;
+      canonicalArtifactsUsed?: boolean;
+      plan?: {
+        timeline?: unknown[];
+        budgetBreakdown?: { projectedTotal?: number };
+        totalCost?: number;
+      };
+    };
+    log("submit_plan succeeds with token-only payload",
+      submittedDetails.planSubmitted === true && submittedDetails.canonicalArtifactsUsed === true);
+    log("submit_plan assembles canonical timeline server-side",
+      JSON.stringify(submittedDetails.plan?.timeline) === JSON.stringify(validationDetails.timeline));
+    log("submit_plan assembles canonical budget server-side",
+      submittedDetails.plan?.totalCost === budgetDetails.breakdown?.projectedTotal &&
+      submittedDetails.plan?.budgetBreakdown?.projectedTotal === budgetDetails.breakdown?.projectedTotal);
     log("Phase transitioned to plan_confirm", mgr4.currentPhase === "plan_confirm");
+    await mgr4.dispatch({ type: "USER_TURN_CLASSIFIED", intent: "modify" });
+    const staleAfterModify = mgr4.resolvePlanningArtifacts(
+      validationDetails.validationToken ?? "",
+      budgetDetails.budgetToken ?? "",
+    );
+    log("Replanning invalidates previous canonical artifacts",
+      mgr4.currentPhase === "planning" && !staleAfterModify.ok);
 
     const mgr5 = new PlanStateManager("smoke-resubmit");
     await mgr5.transition("intent_capture", "start");
     await mgr5.transition("planning", "fields ok");
     await mgr5.transition("plan_confirm", "first submit");
-    const r7 = await withPlanState(mgr5, () => ipTool.execute!("id", {
-      submitPlan: true,
-      plan: {
-        summary: "二次提交（应被拒）",
-        timeline: [{ startTime: "10:00", endTime: "12:00", type: "activity", poiName: "x" }],
-        totalCost: 100, totalDurationMinutes: 120,
-        weather: { city: "北京", date: "2026-07-15", condition: "sunny", tempMax: 30, tempMin: 20, advice: "" },
-      },
+    const r7 = await withPlanState(mgr5, () => submitTool.execute!("id", {
+      summary: "二次提交（应被拒）",
+      validationToken: "x",
+      budgetToken: "y",
     }, undefined, undefined, {} as never));
     const resubmitCode = (r7.details as { code?: string })?.code;
-    log("intent_parse submitPlan=true BLOCKED in plan_confirm (P1: 防 LLM 二次提交覆盖执行状态)", resubmitCode === "SUBMIT_PLAN_OUT_OF_PHASE" || resubmitCode === "PHASE_GUARD", resubmitCode ?? "");
+    log("submit_plan BLOCKED in plan_confirm", resubmitCode === "SUBMIT_PLAN_OUT_OF_PHASE" || resubmitCode === "PHASE_GUARD", resubmitCode ?? "");
 
     const mgr6 = new PlanStateManager("smoke-resubmit-executing");
     await mgr6.transition("intent_capture", "start");
     await mgr6.transition("planning", "fields ok");
     await mgr6.transition("plan_confirm", "first submit");
     await mgr6.transition("executing", "user confirmed");
-    const r8 = await withPlanState(mgr6, () => ipTool.execute!("id", {
-      submitPlan: true,
-      plan: {
-        summary: "executing 阶段再次提交（应被拒）",
-        timeline: [{ startTime: "10:00", endTime: "12:00", type: "activity", poiName: "x" }],
-        totalCost: 100, totalDurationMinutes: 120,
-        weather: { city: "北京", date: "2026-07-15", condition: "sunny", tempMax: 30, tempMin: 20, advice: "" },
-      },
+    const r8 = await withPlanState(mgr6, () => submitTool.execute!("id", {
+      summary: "executing 阶段再次提交（应被拒）",
+      validationToken: "x",
+      budgetToken: "y",
     }, undefined, undefined, {} as never));
     const resubmitExecCode = (r8.details as { code?: string })?.code;
-    log("intent_parse submitPlan=true BLOCKED in executing (P1: 防 LLM 二次提交覆盖执行状态)", resubmitExecCode === "SUBMIT_PLAN_OUT_OF_PHASE" || resubmitExecCode === "PHASE_GUARD", resubmitExecCode ?? "");
+    log("submit_plan BLOCKED in executing", resubmitExecCode === "SUBMIT_PLAN_OUT_OF_PHASE" || resubmitExecCode === "PHASE_GUARD", resubmitExecCode ?? "");
   }
 
   // 每个工具 execute 一次（验证无 crash）
@@ -725,11 +1080,11 @@ async function main() {
 
   const blockResult = await withPlanState(t3mgr, async () => {
     return registeredHandler!(
-      { type: "tool_call", toolName: "reservation_exec", toolCallId: "tc_test", input: {} },
+      { type: "tool_call", toolName: "commit_itinerary", toolCallId: "tc_test", input: {} },
       {} as never,
     );
   });
-  log("Extension blocks illegal tool call (reservation_exec in intent_capture)", (blockResult as { block?: boolean })?.block === true);
+  log("Extension blocks illegal tool call (commit_itinerary in intent_capture)", (blockResult as { block?: boolean })?.block === true);
   log("Extension block reason is string", typeof (blockResult as { reason?: string })?.reason === "string");
 
   const allowResult = await withPlanState(t3mgr, async () => {
@@ -749,7 +1104,7 @@ async function main() {
   log("Extension passes non-business tools (bash) without blocking", nonBusinessResult === undefined);
 
   const noPlanStateResult = await registeredHandler!(
-    { type: "tool_call", toolName: "reservation_exec", toolCallId: "tc_test", input: {} },
+    { type: "tool_call", toolName: "commit_itinerary", toolCallId: "tc_test", input: {} },
     {} as never,
   );
   log("Extension passes when no plan state loaded", noPlanStateResult === undefined);
@@ -924,14 +1279,19 @@ async function main() {
   process.env.RATE_LIMIT_ENABLED = "true";
   process.env.REDIS_URL = "redis://127.0.0.1:1";
   delete (globalThis as { __memoryRateLimiter?: Map<string, number[]> }).__memoryRateLimiter;
-  const tool1 = await checkToolRateLimit("alice", "reservation_exec");
-  const tool2 = await checkToolRateLimit("alice", "reservation_exec");
-  const tool3 = await checkToolRateLimit("alice", "reservation_exec");
-  const tool4 = await checkToolRateLimit("alice", "reservation_exec");
-  const tool5 = await checkToolRateLimit("alice", "reservation_exec");
-  const tool6 = await checkToolRateLimit("alice", "reservation_exec");
-  log("tool rate limit: first 5 reservation_exec allowed", [tool1, tool2, tool3, tool4, tool5].every((r) => r?.allowed === true));
-  log("tool rate limit: 6th reservation_exec blocked", tool6?.allowed === false);
+  const tool1 = await checkToolRateLimit("alice", "commit_itinerary");
+  const tool2 = await checkToolRateLimit("alice", "commit_itinerary");
+  const tool3 = await checkToolRateLimit("alice", "commit_itinerary");
+  const tool4 = await checkToolRateLimit("alice", "commit_itinerary");
+  const tool5 = await checkToolRateLimit("alice", "commit_itinerary");
+  const tool6 = await checkToolRateLimit("alice", "commit_itinerary");
+  log("tool rate limit: first 5 commit_itinerary allowed", [tool1, tool2, tool3, tool4, tool5].every((r) => r?.allowed === true));
+  log("tool rate limit: 6th commit_itinerary blocked", tool6?.allowed === false);
+  const submitLimit1 = await checkToolRateLimit("alice", "submit_plan");
+  const submitLimit2 = await checkToolRateLimit("alice", "submit_plan");
+  const submitLimit3 = await checkToolRateLimit("alice", "submit_plan");
+  log("tool rate limit: submit_plan permits one recovery", submitLimit1?.allowed === true && submitLimit2?.allowed === true);
+  log("tool rate limit: submit_plan blocks blind third retry", submitLimit3?.allowed === false);
   const toolSearch = await checkToolRateLimit("alice", "search_activities");
   log("tool rate limit: search_activities tracked", toolSearch?.limit === 30);
   const toolNoLimit = await checkToolRateLimit("alice", "plan_save");

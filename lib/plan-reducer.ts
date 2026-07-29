@@ -25,6 +25,7 @@ export type PlanEvent =
   | { type: "USER_TURN_CLASSIFIED"; intent: Intent; planHash?: string }
   | { type: "INTENT_FIELDS_UPDATED"; missingCount: number }
   | { type: "CLARIFICATION_ASKED" }
+  | { type: "CLARIFICATION_ANSWERED" }
   | { type: "PLAN_SUBMITTED"; plan: ProposedPlan }
   | { type: "USER_CONFIRMED"; planHash: string }
   | { type: "BOOKING_RESULT"; ok: boolean }
@@ -91,6 +92,9 @@ export function reduce(state: PlanState, event: PlanEvent): ReduceOutput {
 
     case "CLARIFICATION_ASKED":
       return goto("clarifying");
+
+    case "CLARIFICATION_ANSWERED":
+      return phase === "clarifying" ? goto("planning") : stay("reject_out_of_phase");
 
     case "PLAN_SUBMITTED":
       return phase === "planning" ? goto("plan_confirm", event.plan) : stay("reject_out_of_phase");

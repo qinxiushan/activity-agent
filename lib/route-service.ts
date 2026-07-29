@@ -6,11 +6,12 @@
  * 生产阶段：替换 computeRoute() 实现为高德/百度路径规划 API。
  */
 
-export type TransitMode = "walking" | "transit" | "driving";
+export type TransitMode = "walking" | "transit" | "driving" | "bicycling";
 
 export interface CoordWithId {
   id: string;
   name?: string;
+  city?: string;
   lng: number;
   lat: number;
 }
@@ -19,12 +20,14 @@ const SPEED_KMH: Record<TransitMode, number> = {
   walking: 5,
   transit: 20,
   driving: 30,
+  bicycling: 15,
 };
 
 const OVERHEAD_MIN: Record<TransitMode, number> = {
   walking: 2,
   transit: 8,
   driving: 5,
+  bicycling: 3,
 };
 
 export interface RouteResult {
@@ -35,6 +38,11 @@ export interface RouteResult {
   durationMinutes: number;
   estimatedCost: number;
   description: string;
+  source?: "mock" | "amap";
+  costConfidence?: "exact" | "estimate" | "unknown";
+  walkingMinutes?: number;
+  transfers?: number;
+  tolls?: number;
 }
 
 export function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -60,6 +68,7 @@ function estimateCost(distanceM: number, mode: TransitMode): number {
     case "walking": return 0;
     case "transit": return Math.max(3, Math.ceil(km * 0.5));
     case "driving": return Math.max(12, Math.ceil(km * 2.5));
+    case "bicycling": return 0;
   }
 }
 
@@ -81,7 +90,9 @@ export function computeRoute(
     distanceMeters: Math.round(distanceM),
     durationMinutes,
     estimatedCost: cost,
-    description: `${mode === "walking" ? "步行" : mode === "transit" ? "公共交通" : "驾车"} ${(distanceM / 1000).toFixed(1)}km，约 ${durationMinutes} 分钟`,
+    description: `${mode === "walking" ? "步行" : mode === "transit" ? "公共交通" : mode === "bicycling" ? "骑行" : "驾车"} ${(distanceM / 1000).toFixed(1)}km，约 ${durationMinutes} 分钟`,
+    source: "mock",
+    costConfidence: mode === "walking" || mode === "bicycling" ? "exact" : "estimate",
   };
 }
 

@@ -10,6 +10,7 @@ import {
 } from "@/lib/rate-limiter";
 import { guardPromptCommand } from "@/lib/input-guard-route";
 import { audit } from "@/lib/audit-logger";
+import { extractTrustedClientIp } from "@/lib/client-ip";
 
 // POST /api/agent/new  body: { cwd: string; type: string; message: string; ... }
 // Spawns a brand-new pi session and immediately sends the first command.
@@ -60,7 +61,9 @@ export async function POST(req: Request) {
     const { provider, modelId, thinkingLevel, ...promptCommand } = safeCommand as { provider?: string; modelId?: string; thinkingLevel?: string; [key: string]: unknown };
 
     const tempKey = `__new__${Date.now()}`;
-    const { session, realSessionId } = await startRpcSession(tempKey, "", cwd, userId);
+    const { session, realSessionId } = await startRpcSession(tempKey, "", cwd, userId, {
+      clientIp: extractTrustedClientIp(req),
+    });
 
     // Keep the files-route allowed-roots cache (see app/api/files/[...path]/route.ts)
     // in sync so the new cwd is immediately readable via /api/files. Without this,

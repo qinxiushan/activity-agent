@@ -20,6 +20,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getPlanStateRepo } from "./storage";
 import { reduce, type PlanEvent, type ReduceOutput } from "./plan-reducer";
+import type { BudgetBreakdown } from "./budget-service";
+import {
+  applyClarificationAnswers,
+  type PendingClarification,
+} from "./clarification";
 
 // ─── 类型定义 ──────────────────────────────────────────────────────
 
@@ -39,7 +44,7 @@ export interface CapturedIntent {
   date?: string;
   startTime?: string;
   endTime?: string;
-  departurePoint?: { name: string; lng: number; lat: number; city: string };
+  departurePoint?: { name: string; city: string; lng?: number; lat?: number };
   partySize?: number;
   groupType?: "single" | "couple" | "friends" | "family";
   budgetPerPerson?: number;
@@ -47,10 +52,16 @@ export interface CapturedIntent {
   dietaryRestrictions?: string[];
   mood?: string;
   specialRequests?: string[];
+  endPolicy?: "last_poi" | "return_to_start" | "specified";
+  endPoint?: { name: string; city?: string; lng?: number; lat?: number };
+  transportPreferences?: Array<"walking" | "transit" | "driving" | "bicycling">;
 }
 
 export interface ProposedPlan {
   summary: string;
+  validationToken?: string;
+  budgetToken?: string;
+  budgetBreakdown?: BudgetBreakdown;
   timeline: Array<{
     startTime: string;
     endTime: string;
@@ -72,23 +83,65 @@ export interface PlanState {
   clarificationCount: number;
   intent: CapturedIntent;
   plan: ProposedPlan | null;
+  /** POIs that have appeared in submitted plans in this session. */
+  recommendedPoiIds?: string[];
+  lastItineraryValidation?: {
+    token: string;
+    valid: boolean;
+    timelineJson: string;
+    at: number;
+  };
+  lastBudgetCalculation?: {
+    token: string;
+    breakdownJson: string;
+    at: number;
+  };
+  pendingClarification?: PendingClarification;
   lastTransitionAt: number;
   history: Array<{ phase: PlanPhase; at: number; reason?: string }>;
 }
 
+export interface PlanRuntimeContext {
+  /** Runtime-only. Never persisted or returned to the model. */
+  clientIp?: string;
+}
+
+export type CanonicalPlanningArtifacts =
+  | {
+      ok: true;
+      timeline: ProposedPlan["timeline"];
+      budgetBreakdown: BudgetBreakdown;
+    }
+  | {
+      ok: false;
+      code: "ITINERARY_TOKEN_INVALID" | "BUDGET_TOKEN_INVALID" | "PLANNING_ARTIFACT_CORRUPTED";
+      message: string;
+    };
+
 // ─── 工具-phase 规则 ───────────────────────────────────────────────
 
 export const TOOL_PHASE_RULES: Record<string, PlanPhase[]> = {
+  classify_turn: ["clarifying", "plan_confirm"],
   intent_parse: ["intent_capture", "clarifying", "planning"],
+  submit_plan: ["planning"],
   ask_clarification: ["intent_capture"],
+  detect_user_region: ["intent_capture", "planning"],
+  geocode: ["planning"],
+  reverse_geocode: ["planning"],
   get_weather: ["intent_capture", "planning"],
+  discover_place_candidates: ["planning"],
+  search_places_text: ["planning"],
+  search_places_nearby: ["planning"],
+  get_place_details: ["planning", "plan_confirm"],
   search_activities: ["planning"],
   search_restaurants: ["planning"],
   check_opening_hours: ["planning"],
   compute_route: ["planning"],
-  reservation_exec: ["executing"],
-  query_booking: ["plan_confirm", "executing", "completed"],
-  retry_booking: ["executing"],
+  compare_route_options: ["planning"],
+  distance_matrix: ["planning"],
+  validate_itinerary: ["planning"],
+  calculate_budget: ["planning"],
+  commit_itinerary: ["executing"],
   plan_save: ["executing", "completed"],
   plan_load: ["idle", "intent_capture"],
 };
@@ -134,7 +187,9 @@ export const MAX_CLARIFICATIONS = 1;
 
 export class PlanStateManager {
   private readonly state: PlanState;
-  constructor(sessionId: string, _storageDir?: string, userId?: string) {
+  private runtimeContext: PlanRuntimeContext;
+  constructor(sessionId: string, _storageDir?: string, userId?: string, runtimeContext: PlanRuntimeContext = {}) {
+    this.runtimeContext = runtimeContext;
     this.state = {
       sessionId,
       userId,
@@ -143,6 +198,7 @@ export class PlanStateManager {
       clarificationCount: 0,
       intent: {},
       plan: null,
+      recommendedPoiIds: [],
       lastTransitionAt: Date.now(),
       history: [{ phase: "idle", at: Date.now() }],
     };
@@ -168,8 +224,156 @@ export class PlanStateManager {
     return this.state.plan;
   }
 
+  get recommendedPoiIds(): string[] {
+    return [...(this.state.recommendedPoiIds ?? [])];
+  }
+
+  candidateExclusions(extra: string[] = []): string[] {
+    const currentPlanIds = this.state.plan?.timeline.flatMap((entry) =>
+      entry.poiId && (entry.type === "activity" || entry.type === "meal") ? [entry.poiId] : []) ?? [];
+    return [...new Set([...(this.state.recommendedPoiIds ?? []), ...currentPlanIds, ...extra])];
+  }
+
   get clarificationCount(): number {
     return this.state.clarificationCount;
+  }
+
+  get pendingClarification(): PendingClarification | undefined {
+    return this.state.pendingClarification;
+  }
+
+  recordPendingClarification(clarification: PendingClarification): void {
+    this.state.pendingClarification = clarification;
+  }
+
+  async answerClarification(
+    clarificationId: string,
+    answers: Record<string, unknown>,
+  ): Promise<{ ok: true; phase: PlanPhase; intent: CapturedIntent } | { ok: false; error: string }> {
+    const pending = this.state.pendingClarification;
+    if (this.state.phase !== "clarifying") {
+      return { ok: false, error: "当前不在追问阶段" };
+    }
+    if (!pending || pending.id !== clarificationId) {
+      return { ok: false, error: "追问卡片已过期，请刷新后重试" };
+    }
+    try {
+      const applied = applyClarificationAnswers(pending, answers);
+      const nextIntent = { ...this.state.intent, ...applied.intent };
+      const missing = getMissingCriticalFields(nextIntent);
+      if (missing.length > 0) {
+        return { ok: false, error: `仍缺少必填字段: ${missing.join(", ")}` };
+      }
+      this.state.intent = nextIntent;
+      this.state.pendingClarification = {
+        ...pending,
+        status: "answered",
+        answers: applied.normalizedAnswers,
+        answeredAt: Date.now(),
+      };
+      const out = await this.dispatch({ type: "CLARIFICATION_ANSWERED" });
+      if (out.phase !== "planning") {
+        return { ok: false, error: `追问提交后未进入 planning（当前 ${out.phase}）` };
+      }
+      return { ok: true, phase: out.phase, intent: this.state.intent };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  async recordItineraryValidation(token: string, valid: boolean, timeline: ProposedPlan["timeline"]): Promise<void> {
+    this.state.lastItineraryValidation = {
+      token,
+      valid,
+      timelineJson: JSON.stringify(timeline),
+      at: Date.now(),
+    };
+    await this.persist();
+  }
+
+  verifyItineraryValidation(token: string | undefined, timeline: ProposedPlan["timeline"]): boolean {
+    const validation = this.state.lastItineraryValidation;
+    return !!validation?.valid && !!token && validation.token === token &&
+      validation.timelineJson === JSON.stringify(timeline);
+  }
+
+  async recordBudgetCalculation(token: string, breakdown: BudgetBreakdown): Promise<void> {
+    this.state.lastBudgetCalculation = {
+      token,
+      breakdownJson: JSON.stringify(breakdown),
+      at: Date.now(),
+    };
+    await this.persist();
+  }
+
+  verifyBudgetCalculation(
+    token: string | undefined,
+    breakdown: BudgetBreakdown | undefined,
+    totalCost: number | undefined,
+  ): boolean {
+    const calculation = this.state.lastBudgetCalculation;
+    return !!calculation && !!token && !!breakdown &&
+      calculation.token === token &&
+      calculation.breakdownJson === JSON.stringify(breakdown) &&
+      totalCost === breakdown.projectedTotal;
+  }
+
+  /**
+   * Resolve server-owned planning artifacts by opaque handles.
+   *
+   * The LLM must not echo timeline/budget JSON back to the server: generative
+   * reserialization can change harmless whitespace or display notes and cause
+   * false mismatches. Tokens select the exact canonical outputs persisted by
+   * validate_itinerary and calculate_budget.
+   */
+  resolvePlanningArtifacts(
+    validationToken: string,
+    budgetToken: string,
+  ): CanonicalPlanningArtifacts {
+    const validation = this.state.lastItineraryValidation;
+    if (!validation?.valid || validation.token !== validationToken) {
+      return {
+        ok: false,
+        code: "ITINERARY_TOKEN_INVALID",
+        message: "validationToken 无效或已过期，请重新调用 validate_itinerary。",
+      };
+    }
+    const calculation = this.state.lastBudgetCalculation;
+    if (!calculation || calculation.token !== budgetToken) {
+      return {
+        ok: false,
+        code: "BUDGET_TOKEN_INVALID",
+        message: "budgetToken 无效或已过期，请重新调用 calculate_budget。",
+      };
+    }
+    try {
+      const timeline = JSON.parse(validation.timelineJson) as unknown;
+      const budgetBreakdown = JSON.parse(calculation.breakdownJson) as unknown;
+      if (!Array.isArray(timeline) ||
+          !budgetBreakdown || typeof budgetBreakdown !== "object" ||
+          typeof (budgetBreakdown as { projectedTotal?: unknown }).projectedTotal !== "number") {
+        throw new Error("invalid artifact shape");
+      }
+      return {
+        ok: true,
+        timeline: timeline as ProposedPlan["timeline"],
+        budgetBreakdown: budgetBreakdown as BudgetBreakdown,
+      };
+    } catch {
+      return {
+        ok: false,
+        code: "PLANNING_ARTIFACT_CORRUPTED",
+        message: "服务端规划产物损坏，请重新运行行程校验和预算计算。",
+      };
+    }
+  }
+
+  get clientIp(): string | undefined {
+    return this.runtimeContext.clientIp;
+  }
+
+  updateRuntimeContext(context: PlanRuntimeContext): void {
+    if (context.clientIp) this.runtimeContext = { ...this.runtimeContext, clientIp: context.clientIp };
   }
 
   async transition(to: PlanPhase, reason?: string): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -182,6 +386,10 @@ export class PlanStateManager {
     }
     const from = this.state.phase;
     this.state.phase = to;
+    if (to === "planning" && from !== "planning") {
+      this.state.lastItineraryValidation = undefined;
+      this.state.lastBudgetCalculation = undefined;
+    }
     this.state.lastTransitionAt = Date.now();
     this.state.history.push({ phase: to, at: Date.now(), reason: reason ?? `from ${from}` });
     await this.persist();
@@ -202,6 +410,10 @@ export class PlanStateManager {
       }
       const from = this.state.phase;
       this.state.phase = out.phase;
+      if (out.phase === "planning" && from !== "planning") {
+        this.state.lastItineraryValidation = undefined;
+        this.state.lastBudgetCalculation = undefined;
+      }
       this.state.lastTransitionAt = Date.now();
       this.state.history.push({ phase: out.phase, at: Date.now(), reason: `event:${event.type} (from ${from})` });
       changed = true;
@@ -209,6 +421,12 @@ export class PlanStateManager {
 
     if (out.plan && out.plan !== this.state.plan) {
       this.state.plan = out.plan;
+      const selectedPoiIds = out.plan.timeline.flatMap((entry) =>
+        entry.poiId && (entry.type === "activity" || entry.type === "meal") ? [entry.poiId] : []);
+      this.state.recommendedPoiIds = [...new Set([
+        ...(this.state.recommendedPoiIds ?? []),
+        ...selectedPoiIds,
+      ])];
       changed = true;
     }
 
@@ -259,6 +477,10 @@ export class PlanStateManager {
     this.state.clarificationCount = 0;
     this.state.intent = {};
     this.state.plan = null;
+    this.state.recommendedPoiIds = [];
+    this.state.lastItineraryValidation = undefined;
+    this.state.lastBudgetCalculation = undefined;
+    this.state.pendingClarification = undefined;
     this.state.history.push({ phase: "idle", at: Date.now(), reason: "reset" });
   }
 
@@ -271,10 +493,11 @@ export class PlanStateManager {
     }
   }
 
-  static async load(sessionId: string, _storageDir?: string, userId?: string): Promise<PlanStateManager> {
-    const mgr = new PlanStateManager(sessionId, undefined, userId);
+  static async load(sessionId: string, _storageDir?: string, userId?: string, runtimeContext: PlanRuntimeContext = {}): Promise<PlanStateManager> {
+    const mgr = new PlanStateManager(sessionId, undefined, userId, runtimeContext);
     const data = await getPlanStateRepo().load(sessionId);
     if (data) Object.assign(mgr.state, data);
+    if (!Array.isArray(mgr.state.recommendedPoiIds)) mgr.state.recommendedPoiIds = [];
     if (!mgr.state.userId && userId) {
       mgr.state.userId = userId;
     }
@@ -291,7 +514,7 @@ export function describeWaitingFor(phase: PlanPhase): string {
     clarifying: "等待用户回答追问（最多 1 次）",
     planning: "正在自动生成方案（无需用户操作）",
     plan_confirm: "等待用户对最终方案确认（确认/修改/重新生成）",
-    executing: "正在执行预订",
+    executing: "正在生成行程",
     completed: "已完成",
     cancelled: "已取消",
   };
@@ -328,4 +551,3 @@ export function classifyUserConfirmation(message: string): "confirm" | "reject" 
   if (/(修改|换一下|调整|改|重新|换成|不要这个|不要那个|再加|去掉|增加|减少|把.+换|换个)/i.test(m)) return "modify";
   return "ambiguous";
 }
-

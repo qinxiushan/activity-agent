@@ -5,10 +5,14 @@ import { checkToolRateLimit } from "../rate-limiter";
 import { audit } from "../audit-logger";
 
 const BUSINESS_TOOLS = new Set([
-  "intent_parse", "ask_clarification",
-  "get_weather", "search_activities", "search_restaurants",
+  "classify_turn", "intent_parse", "submit_plan", "ask_clarification", "detect_user_region",
+  "geocode", "reverse_geocode", "get_weather",
+  "discover_place_candidates", "search_places_text", "search_places_nearby", "get_place_details",
+  "search_activities", "search_restaurants",
   "check_opening_hours", "compute_route",
-  "reservation_exec", "query_booking", "retry_booking",
+  "compare_route_options", "distance_matrix", "validate_itinerary",
+  "calculate_budget",
+  "commit_itinerary",
   "plan_save", "plan_load",
 ]);
 

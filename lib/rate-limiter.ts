@@ -34,8 +34,17 @@ function getLimitPerMinute(): number {
 }
 
 function getToolLimitPerMinute(toolName: string): number | null {
-  if (toolName === "reservation_exec") return 5;
-  if (toolName === "search_activities" || toolName === "search_restaurants") return 30;
+  if (toolName === "commit_itinerary") return 5;
+  // One normal submission plus one stale-token recovery. Prevent blind retry loops.
+  if (toolName === "submit_plan") return 2;
+  if (toolName === "detect_user_region") return 10;
+  if (toolName === "get_place_details") return 60;
+  if (toolName === "compare_route_options") return 30;
+  if (toolName === "distance_matrix") return 20;
+  if (toolName === "calculate_budget") return 30;
+  if (toolName === "search_activities" || toolName === "search_restaurants" ||
+      toolName === "search_places_text" || toolName === "search_places_nearby" ||
+      toolName === "discover_place_candidates") return 30;
   return null;
 }
 
@@ -45,7 +54,7 @@ export function isRateLimitEnabled(): boolean {
 
 export function isMessageRateLimitedCommand(command: { type?: unknown } | null | undefined): boolean {
   const type = typeof command?.type === "string" ? command.type : "";
-  return type === "prompt" || type === "steer" || type === "follow_up";
+  return type === "prompt" || type === "steer" || type === "follow_up" || type === "clarification_response";
 }
 
 function getMemoryWindowStore(): Map<string, number[]> {

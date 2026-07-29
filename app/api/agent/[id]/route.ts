@@ -12,6 +12,7 @@ import {
 import { canAccessSession } from "@/lib/session-ownership";
 import { guardPromptCommand } from "@/lib/input-guard-route";
 import { audit } from "@/lib/audit-logger";
+import { extractTrustedClientIp } from "@/lib/client-ip";
 
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
@@ -57,6 +58,7 @@ export async function POST(
     // Fast path: already-running session
     const existing = getRpcSession(id);
     if (existing?.isAlive()) {
+      existing.planState.updateRuntimeContext({ clientIp: extractTrustedClientIp(req) });
       const result = await existing.send(safeBody);
       return NextResponse.json({ success: true, data: result });
     }
@@ -71,7 +73,9 @@ export async function POST(
 
     const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
 
-    const { session } = await startRpcSession(id, filePath, cwd, userId);
+    const { session } = await startRpcSession(id, filePath, cwd, userId, {
+      clientIp: extractTrustedClientIp(req),
+    });
     const result = await session.send(safeBody);
 
     return NextResponse.json({ success: true, data: result });

@@ -1,7 +1,7 @@
 /**
  * Real LLM End-to-End Test (HTTP client)
  *
- * 验证完整的 SOP-v2 工作流（用户单次确认 + 1-次追问 + 12 工具）
+ * 验证完整的 SOP-v2 工作流（结构化追问 + token-only 方案提交 + 用户单次确认 + 23 工具）
  *
  * 这个测试通过 HTTP API 驱动 Next.js dev server（必须先启动）：
  *   1. 终端 1:  npm run dev                    # 启动 dev server (port 30142)
@@ -17,15 +17,16 @@
  *
  * 测试做的事：
  *   1. GET /api/models 拿 defaultModel（或 modelList 第一个）
- *   2. POST /api/agent/new 启动 session，发送中文 prompt（含 5 个关键字段）
- *   3. 打开 SSE 流收事件
- *   4. 轮询 /api/agent/[id] 等 isStreaming 变 false
- *   5. 断言：intent_parse / search_* / get_weather / compute_route / check_opening_hours 都调了
- *   6. 读 ~/.pi/agent/plan-states/<sessionId>.json 验证 phase = plan_confirm
- *   7. POST /api/agent/[id] 发 "确认"
- *   8. 等第二轮 idle
- *   9. 断言 phase = executing
- *  10. DELETE /api/sessions/[id] 清理
+ *   2. 用缺字段 prompt 验证 ask_clarification 生成可渲染的结构化问题
+ *   3. POST /api/agent/new 启动完整规划 session（含 5 个关键字段）
+ *   4. 打开 SSE 流收事件并等待结束
+ *   5. 断言：intent_parse / search_* / get_weather / distance_matrix /
+ *      compare_route_options / validate_itinerary / calculate_budget 都调了
+ *   6. 验证自适应预算的 min/likely/max 区间和估价依据
+ *   7. 读 ~/.pi/agent/plan-states/<sessionId>.json 验证 phase = plan_confirm
+ *   8. POST /api/agent/[id] 发带 planHash 的 confirm_plan 结构化确认
+ *   9. 等第二轮 idle并断言 phase = executing
+ *  10. DELETE 两个测试 session
  *
  * 退出码：
  *   0  - 全部断言通过
@@ -35,6 +36,7 @@
  */
 
 import { existsSync, promises as fs } from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { Pool } from "pg";
@@ -77,6 +79,14 @@ function section(name: string): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function createPlanHash(plan: { timeline: Array<{ poiId?: string; startTime: string; endTime: string; type: string }>; totalCost: number }): string {
+  const actionable = {
+    timeline: plan.timeline.map((item) => ({ poiId: item.poiId ?? "", startTime: item.startTime, endTime: item.endTime, type: item.type })),
+    totalCost: plan.totalCost,
+  };
+  return createHash("sha256").update(JSON.stringify(actionable)).digest("hex").slice(0, 16);
 }
 
 function summarizeArgs(args: unknown, maxLen = 80): string {
@@ -234,8 +244,48 @@ interface PlanState {
   phase: string;
   turnCount: number;
   clarificationCount: number;
+  pendingClarification?: {
+    id: string;
+    status: "pending" | "answered" | "expired";
+    title: string;
+    questions: Array<{
+      id: string;
+      field: string;
+      type: string;
+      title: string;
+      required: boolean;
+      options?: Array<{ value: string | number; label: string }>;
+    }>;
+  };
   intent: Record<string, unknown>;
-  plan: { summary: string; timeline: unknown[]; totalCost: number; totalDurationMinutes: number; weather: unknown } | null;
+  plan: {
+    summary: string;
+    timeline: Array<{ poiId?: string; startTime: string; endTime: string; type: string }>;
+    totalCost: number;
+    totalDurationMinutes: number;
+    weather: unknown;
+    budgetBreakdown?: {
+      minimumTotal: number;
+      likelyTotal: number;
+      maximumTotal: number;
+      projectedTotal: number;
+      reserveStrategy: string;
+      items: Array<{
+        originalPriceKnown: boolean;
+        source: string;
+        note: string;
+        priceRange: {
+          low: number;
+          likely: number;
+          high: number;
+          planningReserve: number;
+          source: string;
+          confidence: string;
+          basis: string;
+        };
+      }>;
+    };
+  } | null;
   history: Array<{ phase: string; at: number; reason?: string }>;
 }
 
@@ -307,6 +357,45 @@ async function sessionFileExists(sessionId: string): Promise<boolean> {
   return walk(SESSIONS_DIR);
 }
 
+async function runStructuredClarificationScenario(model: ModelEntry, cwd: string): Promise<void> {
+  section("💬 Structured clarification card");
+  const sparsePrompt = "我想从北京三里屯出发安排一次活动，具体时间、人数和预算还没定";
+  const createRes = await fetch(`${SERVER_BASE}/api/agent/new`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...E2E_USER_HEADERS,
+    },
+    body: JSON.stringify({
+      type: "prompt",
+      cwd,
+      message: sparsePrompt,
+      provider: model.provider,
+      modelId: model.id,
+    }),
+  });
+  if (!createRes.ok) {
+    ok("clarification session created", false, `${createRes.status} ${await createRes.text()}`);
+    return;
+  }
+  const { sessionId } = await createRes.json() as { sessionId: string };
+  ok("clarification session created", !!sessionId, `id=${sessionId.slice(0, 8)}`);
+  const wait = await waitForIdle(sessionId, 120_000);
+  ok("LLM finished clarification turn", wait.idle, `${Math.round(wait.elapsedMs / 1000)}s`);
+  const state = (await readPlanStateStable(sessionId, 5_000)).state;
+  const pending = state?.pendingClarification;
+  ok("phase stopped at clarifying", state?.phase === "clarifying", `actual=${state?.phase ?? "missing"}`);
+  ok("clarification was consumed exactly once", state?.clarificationCount === 1, `actual=${state?.clarificationCount ?? "missing"}`);
+  ok("pending clarification is persisted", pending?.status === "pending");
+  ok("card contains multiple switchable questions", (pending?.questions.length ?? 0) >= 2, `count=${pending?.questions.length ?? 0}`);
+  ok("questions use typed controls", pending?.questions.every((question) =>
+    ["single_select", "multi_select", "text", "number", "date", "time", "location"].includes(question.type)) === true);
+  ok("critical missing fields are represented", ["date", "startTime", "partySize", "budgetPerPerson"].every((field) =>
+    pending?.questions.some((question) => question.field === field)));
+  await cleanup(sessionId);
+  ok("clarification session cleaned up", !(await sessionFileExists(sessionId)));
+}
+
 // ============================================================================
 // 主流程
 // ============================================================================
@@ -332,6 +421,8 @@ async function main(): Promise<void> {
 
   const tempCwd = await makeTempCwd();
   ok("temp cwd created", existsSync(tempCwd), tempCwd);
+
+  await runStructuredClarificationScenario(model, tempCwd);
 
   section("👥 userId 隔离 (v2)");
   const aliceId = `e2e-alice-${Date.now()}`;
@@ -402,7 +493,7 @@ async function main(): Promise<void> {
   const turns: ToolCallRecord[][] = [[]];
   const assistantTexts: string[] = [];
   let sseStop: (() => void) | null = null;
-  const setTurn = (i: number): void => { while (turns.length <= i) turns.push([]); };
+  const setTurn = (i: number): void => { while (turns.length < i) turns.push([]); };
 
   // 步骤 1: 创建 session + 发初始 prompt
   const userPrompt = [
@@ -489,15 +580,29 @@ async function main(): Promise<void> {
   const intentCalled = turns[0]!.some((t) => t.name === "intent_parse");
   ok("intent_parse was called (turn 1)", intentCalled);
 
-  const searchCalled = turns[0]!.some((t) => t.name === "search_activities" || t.name === "search_restaurants");
-  ok("search_activities or search_restaurants was called (turn 1)", searchCalled);
+  const searchCalled = turns[0]!.some((t) =>
+    t.name === "search_activities" || t.name === "search_restaurants" ||
+    t.name === "search_places_text" || t.name === "search_places_nearby" ||
+    t.name === "discover_place_candidates");
+  ok("at least one POI search tool was called (turn 1)", searchCalled);
+  ok("V1 primitive or V2 candidate discovery was used (turn 1)",
+    turns[0]!.some((t) =>
+      t.name === "search_places_text" || t.name === "search_places_nearby" ||
+      t.name === "discover_place_candidates"));
+  ok("V1 batch POI details was used (turn 1)", turns[0]!.some((t) => t.name === "get_place_details"));
+  ok("V2 diverse candidate discovery was used (turn 1)",
+    turns[0]!.some((t) => t.name === "discover_place_candidates"));
 
   ok("get_weather was called in turn 1 (SOP variable)", turns[0]!.some((t) => t.name === "get_weather"));
-  ok("compute_route was called in turn 1 (SOP variable)", turns[0]!.some((t) => t.name === "compute_route"));
-  ok("check_opening_hours was called in turn 1 (SOP variable)", turns[0]!.some((t) => t.name === "check_opening_hours"));
+  ok("V3 distance_matrix was called in turn 1", turns[0]!.some((t) => t.name === "distance_matrix"));
+  ok("V3 compare_route_options was called in turn 1", turns[0]!.some((t) => t.name === "compare_route_options"));
+  ok("V3 validate_itinerary was called in turn 1", turns[0]!.some((t) => t.name === "validate_itinerary"));
+  ok("V4 calculate_budget was called in turn 1", turns[0]!.some((t) => t.name === "calculate_budget"));
+  const submitPlanCalls = turns[0]!.filter((t) => t.name === "submit_plan");
+  ok("submit_plan was called exactly once in turn 1", submitPlanCalls.length === 1, `count=${submitPlanCalls.length}`);
 
-  const noPrematureBooking = !turns[0]!.some((t) => t.name === "reservation_exec");
-  ok("no premature reservation_exec in turn 1", noPrematureBooking);
+  const noPrematureCommit = !turns[0]!.some((t) => t.name === "commit_itinerary");
+  ok("no premature commit_itinerary in turn 1", noPrematureCommit);
 
   // 稳定读取 plan state 验证 phase（轮询直到 phase/turnCount 500ms 不变）
   const stable1 = await readPlanStateStable(sessionId, 8_000);
@@ -516,6 +621,25 @@ async function main(): Promise<void> {
     ok("intent captured (departurePoint)", !!state1.intent.departurePoint, JSON.stringify(state1.intent.departurePoint));
     ok("intent captured (partySize)", state1.intent.partySize !== undefined, String(state1.intent.partySize));
     ok("intent captured (budgetPerPerson)", state1.intent.budgetPerPerson !== undefined, String(state1.intent.budgetPerPerson));
+    const budget = state1.plan?.budgetBreakdown;
+    ok("adaptive budget breakdown persisted", !!budget);
+    ok("adaptive budget totals are ordered",
+      !!budget &&
+      budget.minimumTotal <= budget.likelyTotal &&
+      budget.likelyTotal <= budget.maximumTotal,
+      budget ? `${budget.minimumTotal} <= ${budget.likelyTotal} <= ${budget.maximumTotal}` : "missing");
+    ok("planning total matches adaptive budget", !!budget && state1.plan?.totalCost === budget.projectedTotal);
+    ok("budget reserve strategy persisted",
+      !!budget && ["minimal", "balanced", "conservative"].includes(budget.reserveStrategy),
+      budget?.reserveStrategy);
+    const adaptiveItems = budget?.items.filter((item) => !item.originalPriceKnown) ?? [];
+    ok("unknown original prices carry auditable ranges",
+      adaptiveItems.every((item) =>
+        item.priceRange.low <= item.priceRange.likely &&
+        item.priceRange.likely <= item.priceRange.high &&
+        item.priceRange.basis.length > 0 &&
+        item.priceRange.source.length > 0),
+      `items=${adaptiveItems.length}`);
   }
   const pgOwner = await readPlanStateOwnerFromPg(sessionId);
   if (pgOwner !== null) {
@@ -524,19 +648,21 @@ async function main(): Promise<void> {
     console.log("  ⏭  postgres owner assertion skipped (STORAGE_BACKEND!=postgres or DATABASE_URL unset)");
   }
 
-  // ─── 步骤 3: 发 "确认" ────────────────────────────────
-  section("✅ Step 3: Send confirmation");
+  // ─── 步骤 3: 发结构化确认 ──────────────────────────────
+  section("✅ Step 3: Send structured confirmation");
 
   const beforeConfirm = state1?.phase ?? "?";
   console.log(`  Phase before confirm: ${beforeConfirm}`);
 
+  const planHash = state1?.plan ? createPlanHash(state1.plan) : "";
+  ok("plan hash available for structured confirmation", !!planHash);
   const confirmRes = await fetch(`${SERVER_BASE}/api/agent/${sessionId}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...E2E_USER_HEADERS,
     },
-    body: JSON.stringify({ type: "prompt", message: "确认" }),
+    body: JSON.stringify({ type: "confirm_plan", planHash }),
   });
   if (!confirmRes.ok) {
     console.error(`💥 Failed to send confirm: ${confirmRes.status} ${await confirmRes.text()}`);
@@ -544,7 +670,7 @@ async function main(): Promise<void> {
     await cleanup(sessionId);
     process.exit(3);
   }
-  ok("'确认' sent", true);
+  ok("structured confirmation sent", true);
   currentTurn = 2;
 
   const wait2 = await waitForIdle(sessionId, 120_000);
@@ -571,7 +697,7 @@ async function main(): Promise<void> {
     ok("phase transitioned past plan_confirm after confirm", s2.phase === "executing" || s2.phase === "completed", `actual=${s2.phase}`);
   }
 
-  ok("reservation_exec was called in turn 2 (bookings start)", turns[1] ? turns[1]!.some((t) => t.name === "reservation_exec") : false);
+  ok("commit_itinerary was called in turn 2", turns[1] ? turns[1]!.some((t) => t.name === "commit_itinerary") : false);
 
   // ─── 打印结果 ─────────────────────────────────────────
   section("📊 Trace");

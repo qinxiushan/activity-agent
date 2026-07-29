@@ -3,6 +3,7 @@ import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { resolveUserContext } from "@/lib/user-context";
 import { canAccessSession } from "@/lib/session-ownership";
+import { extractTrustedClientIp } from "@/lib/client-ip";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,9 @@ export async function GET(
     }
     const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
     try {
-      ({ session } = await startRpcSession(id, filePath, cwd, userId));
+      ({ session } = await startRpcSession(id, filePath, cwd, userId, {
+        clientIp: extractTrustedClientIp(req),
+      }));
     } catch (error) {
       return new Response(`Failed to start agent: ${error}`, { status: 500 });
     }
