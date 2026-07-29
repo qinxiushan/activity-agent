@@ -42,7 +42,7 @@ A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.a
 - `scripts/p0-smoke-test.ts` — **356/356 pass**, including data-quality provenance, clarification defaults, token-only canonical submission, warning persistence, artifact invalidation, retry limiting and legacy budget rendering compatibility. No API key needed.
 - `scripts/amap-provider-contract-test.ts` — **16/16 pass** against fixed official-response shapes without network access.
 - `scripts/v5-quality-eval.ts` + `evals/v5-service-scenarios.json` — **60/60 scenarios pass** across 3 cities × 4 party sizes × 5 budgets; evaluates itinerary validity, route availability, budget invariants, source disclosure and estimate explanation.
-- `scripts/eval-v1-contract-test.ts` + `evals/datasets/agent-regression-v1.json` — **37/37 contract assertions pass** over 20 scenarios covering complete plans, one-shot clarification, structured confirmation and historical regressions.
+- `scripts/eval-v1-contract-test.ts` + `evals/datasets/agent-regression-v1.json` — **40/40 contract assertions pass** over 20 scenarios covering complete plans, one-shot clarification, structured confirmation, canonical place-name equivalence and historical regressions.
 - `scripts/eval-agent-v1.ts` — real Agent runner over public HTTP APIs. First DeepSeek V4 Flash sample passed **20/20**, completed in 81.551 seconds with 27 tool calls, and emitted a machine-readable report.
 - `scripts/eval-v2-contract-test.ts` + `evals/datasets/preference-seed-v2.json` — **32/32 assertions pass** over 12 cross-city preference pairs. Labels remain explicitly `seed`.
 - `scripts/eval-review-v2.ts` — creates blinded left/right packets and a separate private mapping manifest, then validates and applies completed reviews.
@@ -140,7 +140,7 @@ node_modules/.bin/tsc --noEmit                # exit 0
 npm run test:smoke                            # 356/356 pass
 npm run test:provider                         # 16/16 pass, no API key
 npm run eval:quality                          # 60 scenarios, no API key
-npm run test:eval:v1                          # 37/37 pass, no API key
+npm run test:eval:v1                          # 40/40 pass, no API key
 npm run test:eval:v2                          # 32/32 pass, no API key
 npm run test:amap                             # requires AMAP_API_KEY
 
@@ -191,7 +191,7 @@ node_modules/.bin/tsc --noEmit
 npm run test:smoke              # 356/356
 npm run test:provider           # 16/16
 npm run eval:quality            # 60 scenarios
-npm run test:eval:v1            # 37/37
+npm run test:eval:v1            # 40/40
 npm run test:eval:v2            # 32/32
 
 # Restart dev server if needed

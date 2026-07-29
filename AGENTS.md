@@ -279,7 +279,7 @@ scripts/
   p0-smoke-test.ts         Unit + integration tests (356 assertions, no API)
   amap-provider-contract-test.ts  Offline AMap response/parser contract (16 assertions)
   v5-quality-eval.ts       Deterministic 60-scenario planning quality evaluation
-  eval-v1-contract-test.ts Eval V1 dataset/replay/grader contract (37 assertions)
+  eval-v1-contract-test.ts Eval V1 dataset/replay/grader contract (40 assertions)
   eval-agent-v1.ts         Real Agent dataset runner + JSON metrics report
   eval-v2-contract-test.ts Eval V2 preference contract (32 assertions)
   eval-review-v2.ts        Blind human-review packet create/apply CLI
@@ -384,7 +384,7 @@ npm run eval:quality
 
 ```bash
 npm run test:eval:v1
-# Expected: 37/37 pass; runs in CI without an API key
+# Expected: 40/40 pass; runs in CI without an API key
 
 # Requires a configured model and a running dev server
 npm run eval:agent:v1 -- --repetitions 1
