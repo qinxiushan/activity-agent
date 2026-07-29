@@ -8,7 +8,7 @@ const PHASES = [
   { key: "clarifying", label: "追问", icon: "?" },
   { key: "planning", label: "自动规划", icon: "" },
   { key: "plan_confirm", label: "等待确认", icon: "" },
-  { key: "executing", label: "执行预订", icon: "→" },
+  { key: "executing", label: "生成行程", icon: "→" },
   { key: "completed", label: "完成", icon: "✓" },
   { key: "cancelled", label: "已取消", icon: "✕" },
 ] as const;
@@ -19,7 +19,7 @@ const PHASE_DESCRIPTIONS: Record<string, string> = {
   clarifying: "等待用户回答追问（最多 1 次）",
   planning: "自动调取天气 / POI / 路线数据",
   plan_confirm: "等待用户对最终方案确认",
-  executing: "执行真实预订",
+  executing: "生成并交付真实行程",
   completed: "已完成",
   cancelled: "已取消",
 };

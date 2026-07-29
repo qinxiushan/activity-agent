@@ -10,8 +10,14 @@ export interface ToolEntry {
 
 export type ToolPreset = "none" | "default" | "full";
 export const PRESET_NONE: string[] = [];
-export const PRESET_DEFAULT: string[] = ["intent_parse", "activity_search", "restaurant_search", "reservation_exec", "plan_save", "plan_load"];
-export const PRESET_FULL: string[] = ["intent_parse", "activity_search", "restaurant_search", "reservation_exec", "plan_save", "plan_load"];
+export const PRESET_DEFAULT: string[] = [
+  "classify_turn", "intent_parse", "submit_plan", "ask_clarification",
+  "detect_user_region", "geocode", "reverse_geocode", "get_weather",
+  "discover_place_candidates", "search_places_text", "search_places_nearby", "get_place_details",
+  "search_activities", "search_restaurants", "check_opening_hours", "compute_route",
+  "commit_itinerary", "plan_save", "plan_load",
+];
+export const PRESET_FULL: string[] = [...PRESET_DEFAULT];
 
 export function getPresetFromTools(tools: ToolEntry[]): ToolPreset {
   const active = tools.filter(t => t.active).map(t => t.name).sort().join(",");
@@ -29,8 +35,8 @@ interface Props {
 
 const PRESETS: { id: ToolPreset; label: string; desc: string; tools: string[] }[] = [
   { id: "none",    label: "Off",  desc: "No tools",                                tools: PRESET_NONE },
-  { id: "default", label: "Low",  desc: "read · bash · edit · write",              tools: PRESET_DEFAULT },
-  { id: "full",    label: "High", desc: "read · bash · edit · write · grep · find · ls", tools: PRESET_FULL },
+  { id: "default", label: "Plan", desc: "位置 · POI · 天气 · 路线 · 行程", tools: PRESET_DEFAULT },
+  { id: "full",    label: "All",  desc: "全部活动规划工具", tools: PRESET_FULL },
 ];
 
 export function ToolPanel({ tools, onPreset, onClose }: Props) {

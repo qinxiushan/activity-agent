@@ -1,6 +1,7 @@
 "use client";
 
 import type { ActivityPlanState } from "@/hooks/useActivitySession";
+import { hasAdaptivePriceRange } from "@/lib/cost-resolver";
 
 const TYPE_ICONS: Record<string, string> = {
   departure: "D",
@@ -66,6 +67,71 @@ export function PlanTimeline({ planState }: { planState: ActivityPlanState | nul
         {plan.summary}
       </div>
 
+      {plan.budgetBreakdown && (
+        <div style={{
+          padding: "10px 12px", marginBottom: 12, borderRadius: 8,
+          background: "var(--bg-hover)", border: "1px solid var(--border)",
+        }}>
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            fontSize: 11, marginBottom: 8,
+          }}>
+            <span style={{ color: "var(--text)", fontWeight: 600 }}>预算账本</span>
+            <span style={{
+              color: plan.budgetBreakdown.status === "exceeded"
+                ? "#ef4444"
+                : plan.budgetBreakdown.status === "near_limit" ? "#f59e0b" : "#10b981",
+              fontWeight: 600,
+            }}>
+              {plan.budgetBreakdown.status === "exceeded"
+                ? `超预算 ¥${Math.abs(plan.budgetBreakdown.remaining)}`
+                : `剩余 ¥${plan.budgetBreakdown.remaining}`}
+            </span>
+          </div>
+          <div style={{
+            display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+            gap: 6, fontSize: 10, color: "var(--text-muted)",
+          }}>
+            <span>已知 ¥{plan.budgetBreakdown.knownTotal}</span>
+            <span>估算 ¥{plan.budgetBreakdown.estimatedTotal}</span>
+            <span>预留 ¥{plan.budgetBreakdown.reserveTotal}</span>
+            <span>预计 ¥{plan.budgetBreakdown.projectedTotal}</span>
+          </div>
+          {typeof plan.budgetBreakdown.minimumTotal === "number" &&
+            typeof plan.budgetBreakdown.maximumTotal === "number" && (
+              <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 6 }}>
+                参考区间 ¥{plan.budgetBreakdown.minimumTotal} - ¥{plan.budgetBreakdown.maximumTotal}
+                {" · "}
+                {plan.budgetBreakdown.reserveStrategy === "conservative"
+                  ? "保守策略"
+                  : plan.budgetBreakdown.reserveStrategy === "minimal" ? "最低策略" : "均衡策略"}
+              </div>
+            )}
+          {plan.budgetBreakdown.items.map((item) => (
+            <div key={item.id} style={{
+              display: "flex", justifyContent: "space-between", gap: 8,
+              marginTop: 6, fontSize: 10, color: "var(--text-dim)",
+            }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {item.label}
+                {item.confidence === "estimate" ? "（估算）" : item.confidence === "unknown" ? "（预留）" : ""}
+              </span>
+              <span style={{ flexShrink: 0 }}>¥{item.amount}</span>
+              {!item.originalPriceKnown && hasAdaptivePriceRange(item.priceRange) && (
+                <span style={{ flexShrink: 0 }}>
+                  区间 ¥{item.priceRange.low}-{item.priceRange.high}/人
+                </span>
+              )}
+            </div>
+          ))}
+          {plan.budgetBreakdown.unknownPriceCount > 0 && (
+            <div style={{ fontSize: 10, color: "#f59e0b", marginTop: 8 }}>
+              {plan.budgetBreakdown.unknownPriceCount} 项价格未知，预留金额不代表真实价格
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ position: "relative" }}>
         <div style={{
           position: "absolute", left: 11, top: 8, bottom: 8,
@@ -108,7 +174,10 @@ export function PlanTimeline({ planState }: { planState: ActivityPlanState | nul
         borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--text-muted)",
       }}>
         <span>总时长 {Math.floor(plan.totalDurationMinutes / 60)}h{plan.totalDurationMinutes % 60}m</span>
-        <span>人均 ¥{plan.totalCost}</span>
+        <span>总计 ¥{plan.totalCost}</span>
+        {plan.budgetBreakdown && typeof plan.budgetBreakdown.projectedPerPerson === "number" && (
+          <span>人均 ¥{plan.budgetBreakdown.projectedPerPerson}</span>
+        )}
         <span>{plan.timeline.length} 段</span>
       </div>
     </div>

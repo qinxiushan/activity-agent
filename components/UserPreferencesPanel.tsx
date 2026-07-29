@@ -185,7 +185,7 @@ export function UserPreferencesPanel() {
       <div style={{
         fontSize: 10, color: "var(--text-dim)", marginBottom: 8, fontFamily: "var(--font-mono)",
       }}>
-        方案 {prefs.stats.totalCompletedPlans} · 预订 {prefs.stats.totalBookings} · {timeAgo(prefs.updatedAt)} 更新
+        方案 {prefs.stats.totalCompletedPlans} · 已交付 {prefs.stats.totalBookings} · {timeAgo(prefs.updatedAt)} 更新
       </div>
 
       {/* Defaults */}

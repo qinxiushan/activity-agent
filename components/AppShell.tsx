@@ -797,6 +797,7 @@ export function AppShell({
               abort={activity.abort}
               retryPlanPoll={activity.retryPlanPoll}
               confirmPlan={activity.confirmPlan}
+              submitClarification={activity.submitClarification}
             />
           </div>
         </div>

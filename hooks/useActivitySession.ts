@@ -5,6 +5,7 @@ import type { StandardEvent } from "@/lib/event-types";
 import { AgentApiError, extractApiError } from "@/lib/agent-client";
 import { restoreActivityToolCallsFromMessages } from "@/lib/activity-tool-history";
 import type { AgentMessage } from "@/lib/types";
+import type { PendingClarification } from "@/lib/clarification";
 
 export interface ActivityToolCall {
   id: string;
@@ -22,12 +23,50 @@ export interface ActivityPlanState {
   planHash?: string;
   turnCount: number;
   clarificationCount: number;
+  pendingClarification?: PendingClarification;
   intent: Record<string, unknown>;
   plan: {
     summary: string;
     timeline: Array<{ startTime: string; endTime: string; type: string; poiName?: string; notes?: string }>;
     totalCost: number;
     totalDurationMinutes: number;
+    budgetBreakdown?: {
+      knownTotal: number;
+      estimatedTotal: number;
+      reserveTotal: number;
+      minimumTotal?: number;
+      likelyTotal?: number;
+      maximumTotal?: number;
+      projectedTotal: number;
+      projectedPerPerson?: number;
+      budgetLimit: number;
+      remaining: number;
+      status: "within" | "near_limit" | "exceeded";
+      completeness: number;
+      unknownPriceCount: number;
+      reserveStrategy?: "minimal" | "balanced" | "conservative";
+      assumptions: string[];
+      items: Array<{
+        id: string;
+        category: string;
+        label: string;
+        amount: number;
+        confidence: "exact" | "estimate" | "unknown";
+        originalPriceKnown?: boolean;
+        priceRange?: {
+          status: "exact" | "estimated" | "unresolved";
+          low: number;
+          likely: number;
+          high: number;
+          planningReserve: number;
+          source: string;
+          confidence: string;
+          basis: string;
+          sampleSize?: number;
+        };
+        note: string;
+      }>;
+    };
     weather: { city: string; date: string; condition: string; tempMax: number; tempMin: number; advice: string };
   } | null;
   history: Array<{ phase: string; at: number; reason?: string }>;
@@ -96,6 +135,7 @@ export interface UseActivitySessionResult extends ActivityState {
   startSession: (cwd: string, message: string, model: { provider: string; modelId: string }) => Promise<boolean>;
   sendMessage: (message: string) => Promise<boolean>;
   confirmPlan: (planHash: string) => Promise<boolean>;
+  submitClarification: (clarificationId: string, answers: Record<string, unknown>) => Promise<boolean>;
   abort: () => Promise<void>;
   reset: () => void;
   retryPlanPoll: () => Promise<void>;
@@ -362,6 +402,45 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
     }
   }, [serverBase]);
 
+  const submitClarification = useCallback(async (
+    clarificationId: string,
+    answers: Record<string, unknown>,
+  ) => {
+    const sid = sessionIdRef.current;
+    if (!sid || inFlightSendRef.current) return false;
+    inFlightSendRef.current = true;
+    try {
+      const res = await fetch(`${serverBase}/api/agent/${encodeURIComponent(sid)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "clarification_response", clarificationId, answers }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        data?: { error?: string; message?: string };
+      };
+      const inner = body.data && typeof body.data === "object" ? body.data : body;
+      if (!res.ok || body.error || inner.error) {
+        setState((prev) => ({
+          ...prev,
+          error: inner.message ?? inner.error ?? body.message ?? body.error ?? "追问信息提交失败",
+        }));
+        return false;
+      }
+      setState((prev) => ({ ...prev, error: null, agentRunning: true }));
+      return true;
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      return false;
+    } finally {
+      inFlightSendRef.current = false;
+    }
+  }, [serverBase]);
+
   const abort = useCallback(async () => {
     const sid = sessionIdRef.current;
     if (!sid) return;
@@ -417,5 +496,15 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
     startPlanPoll(sid);
   }, [connectEvents, startPlanPoll]);
 
-  return { ...state, startSession, sendMessage, confirmPlan, abort, reset, retryPlanPoll, trackSession };
+  return {
+    ...state,
+    startSession,
+    sendMessage,
+    confirmPlan,
+    submitClarification,
+    abort,
+    reset,
+    retryPlanPoll,
+    trackSession,
+  };
 }

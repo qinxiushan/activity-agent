@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ActivityPanel } from "@/components/activity/ActivityPanel";
 import { UserPreferencesPanel } from "@/components/UserPreferencesPanel";
 import type { ActivityPlanState, ActivityToolCall } from "@/hooks/useActivitySession";
+import { ClarificationCard } from "@/components/activity/ClarificationCard";
 
 interface Props {
   sessionId: string | null;
@@ -17,6 +18,7 @@ interface Props {
   abort: () => Promise<void>;
   retryPlanPoll: () => Promise<void>;
   confirmPlan: (planHash: string) => Promise<boolean>;
+  submitClarification: (clarificationId: string, answers: Record<string, unknown>) => Promise<boolean>;
 }
 
 export function ActivityPanelWrapper({
@@ -31,9 +33,11 @@ export function ActivityPanelWrapper({
   abort,
   retryPlanPoll,
   confirmPlan,
+  submitClarification,
 }: Props) {
   const [aborting, setAborting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [submittingClarification, setSubmittingClarification] = useState(false);
 
   const handleAbort = async () => {
     if (aborting) return;
@@ -52,6 +56,17 @@ export function ActivityPanelWrapper({
       await confirmPlan(planState.planHash);
     } finally {
       setConfirming(false);
+    }
+  };
+
+  const handleClarification = async (answers: Record<string, unknown>) => {
+    const clarification = planState?.pendingClarification;
+    if (!clarification || submittingClarification) return false;
+    setSubmittingClarification(true);
+    try {
+      return await submitClarification(clarification.id, answers);
+    } finally {
+      setSubmittingClarification(false);
     }
   };
 
@@ -181,13 +196,21 @@ export function ActivityPanelWrapper({
                 cursor: confirming || agentRunning ? "default" : "pointer",
               }}
             >
-              {confirming ? "确认中…" : "✓ 确认并预订"}
+              {confirming ? "确认中…" : "✓ 确认并生成行程"}
             </button>
             <div style={{ fontSize: 9, color: "var(--text-dim)", marginTop: 3, textAlign: "center" }}>
               方案指纹 {planState.planHash.slice(0, 8)}… · 确认独立于对话文本
             </div>
           </div>
         )}
+        {planState?.phase === "clarifying" &&
+          planState.pendingClarification?.status === "pending" && (
+            <ClarificationCard
+              clarification={planState.pendingClarification}
+              submitting={submittingClarification}
+              onSubmit={handleClarification}
+            />
+          )}
         <UserPreferencesPanel />
         <ActivityPanel planState={planState} toolCalls={toolCalls} />
       </div>

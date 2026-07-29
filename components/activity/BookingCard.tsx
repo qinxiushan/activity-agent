@@ -2,136 +2,52 @@
 
 import type { ActivityToolCall, ActivityPlanState } from "@/hooks/useActivitySession";
 
-interface BookingDetails {
-  orderId: string;
-  restaurantName: string;
-  date: string;
-  time: string;
-  partySize: number;
-  confirmationCode?: string;
-  status: string;
+interface ItineraryDetails {
+  downloadUrl: string;
+  navigationLinks: Array<{ poiId: string; poiName: string; url: string }>;
+  diningSearchLinks: Array<{ poiId: string; poiName: string; url: string }>;
 }
 
-function extractBooking(toolCalls: ActivityToolCall[]): BookingDetails | null {
+function extractItinerary(toolCalls: ActivityToolCall[]): ItineraryDetails | null {
   for (let i = toolCalls.length - 1; i >= 0; i--) {
-    const tc = toolCalls[i]!;
-    if (tc.name !== "reservation_exec" && tc.name !== "query_booking") continue;
-    if (!tc.ok) continue;
-    const parsed = parseBookingResult(tc.result);
-    if (!parsed) continue;
-    // Tool 返回 { content, details: { orderId, status, restaurantName, ... } }
-    // pi SDK 可能把 details 展开到顶层，也可能保留嵌套——两处都查
-    const data = (parsed.details as Record<string, unknown> | undefined) ?? parsed;
-    const orderId = (data.orderId as string) ?? "";
-    if (!orderId) continue;
-    const restaurantName = (data.restaurantName as string) ?? "";
-    const date = (data.date as string) ?? "";
-    const time = (data.time as string) ?? "";
-    const partySize = typeof data.partySize === "number" ? data.partySize : 2;
-    const confirmationCode = (data.confirmationCode as string | undefined) ?? (data.code as string | undefined);
-    const status = (data.status as string) ?? "unknown";
-    return { orderId, restaurantName, date, time, partySize, confirmationCode, status };
+    const call = toolCalls[i]!;
+    if (call.name !== "commit_itinerary" || !call.ok) continue;
+    let parsed: Record<string, unknown> | null = null;
+    if (typeof call.result === "string") {
+      try { parsed = JSON.parse(call.result) as Record<string, unknown>; } catch { continue; }
+    } else if (call.result && typeof call.result === "object") parsed = call.result as Record<string, unknown>;
+    const data = (parsed?.details as Record<string, unknown> | undefined) ?? parsed;
+    if (!data || typeof data.downloadUrl !== "string") continue;
+    return {
+      downloadUrl: data.downloadUrl,
+      navigationLinks: Array.isArray(data.navigationLinks) ? data.navigationLinks as ItineraryDetails["navigationLinks"] : [],
+      diningSearchLinks: Array.isArray(data.diningSearchLinks) ? data.diningSearchLinks as ItineraryDetails["diningSearchLinks"] : [],
+    };
   }
-  return null;
-}
-
-function parseBookingResult(result: unknown): Record<string, unknown> | null {
-  if (result === undefined || result === null) return null;
-  if (typeof result === "string") {
-    try { return JSON.parse(result) as Record<string, unknown>; } catch { return null; }
-  }
-  if (typeof result === "object") return result as Record<string, unknown>;
   return null;
 }
 
 export function BookingCard({ toolCalls, planState }: { toolCalls: ActivityToolCall[]; planState: ActivityPlanState | null }) {
-  const booking = extractBooking(toolCalls);
-  const isExecuting = planState?.phase === "executing" || planState?.phase === "completed";
+  const itinerary = extractItinerary(toolCalls);
+  const isExecuting = planState?.phase === "executing";
+  if (!itinerary && !isExecuting) return null;
 
-  if (!booking && !isExecuting) return null;
-
-  if (!booking) {
-    return (
-      <div style={{
-        background: "var(--bg-panel)", border: "1px solid var(--border)",
-        borderRadius: 12, padding: "16px 18px", marginBottom: 12,
-      }}>
-        <div style={{
-          fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase",
-          letterSpacing: 0.6, marginBottom: 8, fontWeight: 600,
-        }}>
-          {planState?.phase === "completed" ? "预订已完成" : "预订中…"}
-        </div>
-        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-          {planState?.phase === "completed"
-            ? "订单详情将在下次查看时显示。"
-            : "正在调用 reservation_exec…"}
-        </div>
-      </div>
-    );
+  if (!itinerary) {
+    return <div style={{ background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 18px", marginBottom: 12 }}>
+      <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8, fontWeight: 600 }}>正在生成行程…</div>
+      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>正在冻结方案、生成 .ics 日历文件与导航交接链接。</div>
+    </div>;
   }
 
-  const statusColor = booking.status === "confirmed" || booking.status === "notified"
-    ? "#10b981"
-    : booking.status === "failed"
-      ? "#ef4444"
-      : "#f59e0b";
-
-  return (
-    <div style={{
-      background: "linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--bg-panel)), var(--bg-panel))",
-      border: "1px solid color-mix(in srgb, var(--accent) 30%, var(--border))",
-      borderRadius: 12, padding: "16px 18px", marginBottom: 12,
-    }}>
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        marginBottom: 12,
-      }}>
-        <div style={{
-          fontSize: 11, color: "var(--accent)", textTransform: "uppercase",
-          letterSpacing: 0.6, fontWeight: 700,
-        }}>
-          预订确认
-        </div>
-        <div style={{
-          fontSize: 9, padding: "2px 8px", borderRadius: 10,
-          background: statusColor, color: "white", fontWeight: 600, textTransform: "uppercase",
-        }}>
-          {booking.status}
-        </div>
-      </div>
-
-      <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>
-        {booking.restaurantName}
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 11, color: "var(--text-muted)" }}>
-        <div>
-          <div style={{ color: "var(--text-dim)", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4 }}>日期</div>
-          <div style={{ color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{booking.date}</div>
-        </div>
-        <div>
-          <div style={{ color: "var(--text-dim)", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4 }}>时间</div>
-          <div style={{ color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{booking.time}</div>
-        </div>
-        <div>
-          <div style={{ color: "var(--text-dim)", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4 }}>人数</div>
-          <div style={{ color: "var(--text)" }}>{booking.partySize} 人</div>
-        </div>
-        {booking.confirmationCode && (
-          <div>
-            <div style={{ color: "var(--text-dim)", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4 }}>确认码</div>
-            <div style={{ color: "var(--accent)", fontWeight: 700, fontFamily: "var(--font-mono)" }}>{booking.confirmationCode}</div>
-          </div>
-        )}
-      </div>
-
-      <div style={{
-        marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)",
-        fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)",
-      }}>
-        订单号: {booking.orderId}
-      </div>
-    </div>
-  );
+  return <div style={{ background: "linear-gradient(135deg, color-mix(in srgb, #16a34a 8%, var(--bg-panel)), var(--bg-panel))", border: "1px solid color-mix(in srgb, #16a34a 35%, var(--border))", borderRadius: 12, padding: "16px 18px", marginBottom: 12 }}>
+    <div style={{ fontSize: 11, color: "#16a34a", textTransform: "uppercase", letterSpacing: 0.6, fontWeight: 700, marginBottom: 8 }}>行程已生成</div>
+    <a href={itinerary.downloadUrl} style={{ display: "block", textAlign: "center", background: "#16a34a", color: "white", textDecoration: "none", padding: "8px 10px", borderRadius: 6, fontSize: 12, fontWeight: 600 }}>下载 .ics 日历文件</a>
+    {itinerary.navigationLinks.length > 0 && <div style={{ marginTop: 12, fontSize: 11, color: "var(--text-muted)" }}>
+      <div style={{ color: "var(--text-dim)", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 5 }}>高德导航</div>
+      {itinerary.navigationLinks.map((link) => <a key={link.poiId} href={link.url} target="_blank" rel="noreferrer" style={{ display: "block", color: "var(--accent)", marginBottom: 3 }}>{link.poiName}</a>)}
+    </div>}
+    {itinerary.diningSearchLinks.length > 0 && <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)", fontSize: 10, color: "var(--text-dim)" }}>
+      餐厅链接会打开平台搜索页，供你自行继续订位；本系统未代为订位。
+    </div>}
+  </div>;
 }
