@@ -17,10 +17,13 @@ import { AmapDataProvider } from "./amap-data-provider";
 import type { TransitMode, RouteResult } from "./route-service";
 import type { WeatherForecast } from "./weather-service";
 import { attachFallbackQuality } from "./data-quality";
+import { ReplayDataProvider } from "./eval/replay-provider";
 
 const mockProvider = new MockDataProvider();
 let amapProvider: AmapDataProvider | undefined;
 let resilientAmapProvider: DataProvider | undefined;
+let replayProvider: ReplayDataProvider | undefined;
+let replayProviderPath: string | undefined;
 
 export type DataFallbackPolicy = "allow_mock" | "fail_closed";
 
@@ -39,6 +42,27 @@ export function getDataFallbackPolicy(): DataFallbackPolicy {
 }
 
 export function getDataProviderStatus(): DataProviderStatus {
+  const replayPath = process.env.DATA_REPLAY_FIXTURE;
+  if (replayPath) {
+    try {
+      const provider = getReplayProvider(replayPath);
+      return {
+        requestedSource: provider.kind,
+        activeSource: provider.kind,
+        fallbackPolicy: "fail_closed",
+        configured: true,
+        warning: `deterministic replay fixture: ${provider.fixture.id}`,
+      };
+    } catch (error) {
+      return {
+        requestedSource: "mock",
+        activeSource: "unavailable",
+        fallbackPolicy: "fail_closed",
+        configured: false,
+        warning: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
   const requestedSource = process.env.DATA_SOURCE === "amap" ? "amap" : "mock";
   const fallbackPolicy = getDataFallbackPolicy();
   if (requestedSource === "mock") {
@@ -82,6 +106,8 @@ class FallbackDataProvider implements DataProvider {
 }
 
 export function getDataProvider(): DataProvider {
+  const replayPath = process.env.DATA_REPLAY_FIXTURE;
+  if (replayPath) return getReplayProvider(replayPath);
   const status = getDataProviderStatus();
   if (status.requestedSource === "mock") return mockProvider;
   if (!status.configured) {
@@ -99,4 +125,14 @@ export function getDataProvider(): DataProvider {
 export function resetDataProviderForTests(): void {
   amapProvider = undefined;
   resilientAmapProvider = undefined;
+  replayProvider = undefined;
+  replayProviderPath = undefined;
+}
+
+function getReplayProvider(filePath: string): ReplayDataProvider {
+  if (!replayProvider || replayProviderPath !== filePath) {
+    replayProvider = ReplayDataProvider.fromFile(filePath, mockProvider);
+    replayProviderPath = filePath;
+  }
+  return replayProvider;
 }

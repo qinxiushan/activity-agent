@@ -29,6 +29,10 @@ export interface EvalStateSnapshot {
   clarificationCount: number;
   intent?: CapturedIntent;
   plan?: ProposedPlan;
+  pendingClarification?: {
+    id: string;
+    status: "pending" | "answered" | "expired";
+  };
 }
 
 export interface EvalOrderRule {
@@ -125,6 +129,26 @@ export interface EvalRun {
     outputTokens?: number;
     costUsd?: number;
   };
+}
+
+export interface EvalAgentCommand {
+  type: "prompt" | "confirm_plan" | "clarification_response";
+  message?: string;
+  planHash?: string;
+  clarificationId?: string;
+  answers?: Record<string, unknown>;
+}
+
+export interface EvalAgentTurn {
+  events: Omit<EvalTraceEvent, "sequence">[];
+  state: EvalStateSnapshot;
+}
+
+export interface EvalAgentDriver {
+  readonly target: EvalTarget;
+  start(initialMessage: string): Promise<EvalAgentTurn>;
+  send(command: EvalAgentCommand): Promise<EvalAgentTurn>;
+  close(): Promise<void>;
 }
 
 export type EvalCheckCategory =
