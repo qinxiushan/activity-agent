@@ -1,0 +1,193 @@
+[
+  {
+    "id": "complete-beijing-couple",
+    "version": "1.0.0",
+    "description": "完整北京情侣行程停在唯一确认点",
+    "tags": ["complete", "beijing", "couple", "baseline"],
+    "user": {
+      "initialMessage": "2026年8月1日10点从北京三里屯出发，和女朋友两个人玩到18点，人均预算300元，想安排室内文化活动和午餐。",
+      "hiddenGoal": {"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"三里屯","partySize":2,"budgetPerPerson":300}
+    },
+    "environment": {"fixtureId":"mock-v1"},
+    "oracle": {
+      "expectedFinalPhases":["plan_confirm"], "planRequired":true, "requireNonEmptyTimeline":true,
+      "requireChronologicalTimeline":true, "requireBudgetInvariant":true, "requireWarningsPreserved":true,
+      "requiredIntent":{"date":"2026-08-01","startTime":"10:00","partySize":2,"budgetPerPerson":300,"departurePoint":{"name":"三里屯","city":"北京"}},
+      "requiredTools":["intent_parse","validate_itinerary","calculate_budget","submit_plan"],
+      "requiredToolGroups":[{"id":"poi_search","anyOf":["discover_place_candidates","search_places_text","search_activities"]}],
+      "forbiddenTools":["commit_itinerary"], "toolOrder":[{"before":"validate_itinerary","after":"submit_plan"},{"before":"calculate_budget","after":"submit_plan"}],
+      "maxToolCalls":{"submit_plan":1}, "maxClarifications":1, "requireConfirmationBeforeCommit":true
+    }
+  },
+  {
+    "id": "complete-shanghai-friends",
+    "version": "1.0.0",
+    "description": "完整上海朋友聚会规划",
+    "tags": ["complete", "shanghai", "friends"],
+    "user": {"initialMessage":"2026年8月1日9点30从上海人民广场出发，4个朋友玩到18点30，人均预算600元，想看展览并吃本帮菜。","hiddenGoal":{"date":"2026-08-01","startTime":"09:30","endTime":"18:30","departurePoint":"人民广场","partySize":4,"budgetPerPerson":600}},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requireWarningsPreserved":true,"requiredIntent":{"date":"2026-08-01","startTime":"09:30","partySize":4,"budgetPerPerson":600,"departurePoint":{"name":"人民广场","city":"上海"}},"requiredTools":["intent_parse","validate_itinerary","calculate_budget","submit_plan"],"requiredToolGroups":[{"id":"poi_search","anyOf":["discover_place_candidates","search_places_text","search_activities"]}],"forbiddenTools":["commit_itinerary"],"toolOrder":[{"before":"validate_itinerary","after":"submit_plan"},{"before":"calculate_budget","after":"submit_plan"}],"maxToolCalls":{"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "complete-shenzhen-single",
+    "version": "1.0.0",
+    "description": "完整深圳单人低预算规划",
+    "tags": ["complete", "shenzhen", "single", "low_budget"],
+    "user":{"initialMessage":"2026年8月1日10点从深圳市民中心出发，一个人玩到17点，人均预算150元，偏好免费文化活动和简餐。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"17:00","departurePoint":"市民中心","partySize":1,"budgetPerPerson":150}},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requireWarningsPreserved":true,"requiredIntent":{"date":"2026-08-01","startTime":"10:00","partySize":1,"budgetPerPerson":150,"departurePoint":{"name":"市民中心","city":"深圳"}},"requiredTools":["intent_parse","validate_itinerary","calculate_budget","submit_plan"],"requiredToolGroups":[{"id":"poi_search","anyOf":["discover_place_candidates","search_places_text","search_activities"]}],"forbiddenTools":["commit_itinerary"],"toolOrder":[{"before":"validate_itinerary","after":"submit_plan"},{"before":"calculate_budget","after":"submit_plan"}],"maxToolCalls":{"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "complete-beijing-family",
+    "version": "1.0.0",
+    "description": "北京六人家庭高预算规划",
+    "tags": ["complete", "beijing", "family", "large_party"],
+    "user":{"initialMessage":"2026年8月1日9点30从北京国贸出发，家庭6人玩到18点30，人均预算1000元，希望亲子友好、少走路并安排午餐。","hiddenGoal":{"date":"2026-08-01","startTime":"09:30","endTime":"18:30","departurePoint":"国贸","partySize":6,"budgetPerPerson":1000}},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requireWarningsPreserved":true,"requiredIntent":{"date":"2026-08-01","startTime":"09:30","partySize":6,"budgetPerPerson":1000,"departurePoint":{"name":"国贸","city":"北京"}},"requiredTools":["intent_parse","validate_itinerary","calculate_budget","submit_plan"],"requiredToolGroups":[{"id":"poi_search","anyOf":["discover_place_candidates","search_places_text","search_activities"]}],"forbiddenTools":["commit_itinerary"],"toolOrder":[{"before":"validate_itinerary","after":"submit_plan"},{"before":"calculate_budget","after":"submit_plan"}],"maxToolCalls":{"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "complete-shanghai-rain",
+    "version": "1.0.0",
+    "description": "上海雨天室内偏好",
+    "tags": ["complete", "shanghai", "weather", "indoor"],
+    "user":{"initialMessage":"2026年8月1日10点从上海静安寺出发，两个人玩到18点，人均预算500元；如果下雨请只安排室内活动。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"静安寺","partySize":2,"budgetPerPerson":500}},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requireWarningsPreserved":true,"requiredIntent":{"date":"2026-08-01","startTime":"10:00","partySize":2,"budgetPerPerson":500,"departurePoint":{"name":"静安寺","city":"上海"}},"requiredTools":["intent_parse","get_weather","validate_itinerary","calculate_budget","submit_plan"],"requiredToolGroups":[{"id":"poi_search","anyOf":["discover_place_candidates","search_places_text","search_activities"]}],"forbiddenTools":["commit_itinerary"],"toolOrder":[{"before":"validate_itinerary","after":"submit_plan"},{"before":"calculate_budget","after":"submit_plan"}],"maxToolCalls":{"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "complete-shenzhen-bicycle",
+    "version": "1.0.0",
+    "description": "深圳骑行偏好仍需比较路线",
+    "tags": ["complete", "shenzhen", "bicycling"],
+    "user":{"initialMessage":"2026年8月1日9点从深圳大学城出发，2个人到17点，人均预算300元，天气允许时优先骑行。","hiddenGoal":{"date":"2026-08-01","startTime":"09:00","endTime":"17:00","departurePoint":"深圳大学城","partySize":2,"budgetPerPerson":300}},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requireWarningsPreserved":true,"requiredIntent":{"date":"2026-08-01","startTime":"09:00","partySize":2,"budgetPerPerson":300,"departurePoint":{"name":"深圳大学城","city":"深圳"}},"requiredTools":["intent_parse","compare_route_options","validate_itinerary","calculate_budget","submit_plan"],"requiredToolGroups":[{"id":"poi_search","anyOf":["discover_place_candidates","search_places_text","search_activities"]}],"forbiddenTools":["commit_itinerary"],"toolOrder":[{"before":"validate_itinerary","after":"submit_plan"},{"before":"calculate_budget","after":"submit_plan"}],"maxToolCalls":{"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "complete-default-last-poi",
+    "version": "1.0.0",
+    "description": "未说明终点时在最后活动点结束",
+    "tags": ["complete", "end_policy", "last_poi"],
+    "user":{"initialMessage":"2026年8月1日10点从北京望京出发，两个人玩到18点，人均预算400元，没有指定返程。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"望京","partySize":2,"budgetPerPerson":400}},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requireWarningsPreserved":true,"requiredIntent":{"date":"2026-08-01","startTime":"10:00","partySize":2,"budgetPerPerson":400,"endPolicy":"last_poi"},"requiredTools":["intent_parse","validate_itinerary","calculate_budget","submit_plan"],"requiredToolGroups":[{"id":"poi_search","anyOf":["discover_place_candidates","search_places_text","search_activities"]}],"forbiddenTools":["commit_itinerary"],"toolOrder":[{"before":"validate_itinerary","after":"submit_plan"},{"before":"calculate_budget","after":"submit_plan"}],"maxToolCalls":{"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "complete-return-start",
+    "version": "1.0.0",
+    "description": "明确要求返回起点",
+    "tags": ["complete", "end_policy", "return_to_start"],
+    "user":{"initialMessage":"2026年8月1日10点从上海徐家汇出发，2个人玩到18点并返回徐家汇，人均预算600元。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"徐家汇","partySize":2,"budgetPerPerson":600}},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requireWarningsPreserved":true,"requiredIntent":{"date":"2026-08-01","startTime":"10:00","partySize":2,"budgetPerPerson":600,"endPolicy":"return_to_start"},"requiredTools":["intent_parse","validate_itinerary","calculate_budget","submit_plan"],"requiredToolGroups":[{"id":"poi_search","anyOf":["discover_place_candidates","search_places_text","search_activities"]}],"forbiddenTools":["commit_itinerary"],"toolOrder":[{"before":"validate_itinerary","after":"submit_plan"},{"before":"calculate_budget","after":"submit_plan"}],"maxToolCalls":{"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "complete-dietary",
+    "version": "1.0.0",
+    "description": "饮食限制必须进入意图",
+    "tags": ["complete", "dietary", "constraint"],
+    "user":{"initialMessage":"2026年8月1日10点从深圳福田站出发，朋友4人玩到18点，人均预算500元，其中一人素食，请安排合适午餐。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"福田站","partySize":4,"budgetPerPerson":500}},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requireWarningsPreserved":true,"requiredIntent":{"date":"2026-08-01","startTime":"10:00","partySize":4,"budgetPerPerson":500,"dietaryRestrictions":["素食"]},"requiredTools":["intent_parse","validate_itinerary","calculate_budget","submit_plan"],"requiredToolGroups":[{"id":"poi_search","anyOf":["discover_place_candidates","search_places_text","search_activities"]}],"forbiddenTools":["commit_itinerary"],"toolOrder":[{"before":"validate_itinerary","after":"submit_plan"},{"before":"calculate_budget","after":"submit_plan"}],"maxToolCalls":{"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "complete-low-budget-honest",
+    "version": "1.0.0",
+    "description": "极低预算允许超预算但必须诚实计算",
+    "tags": ["complete", "low_budget", "uncertainty"],
+    "user":{"initialMessage":"2026年8月1日10点从北京前门出发，2个人玩到18点，人均预算80元，希望有一个文化活动和一顿午餐。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"前门","partySize":2,"budgetPerPerson":80}},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requireWarningsPreserved":true,"requiredIntent":{"date":"2026-08-01","startTime":"10:00","partySize":2,"budgetPerPerson":80},"requiredTools":["intent_parse","validate_itinerary","calculate_budget","submit_plan"],"requiredToolGroups":[{"id":"poi_search","anyOf":["discover_place_candidates","search_places_text","search_activities"]}],"forbiddenTools":["commit_itinerary"],"toolOrder":[{"before":"validate_itinerary","after":"submit_plan"},{"before":"calculate_budget","after":"submit_plan"}],"maxToolCalls":{"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "clarify-missing-budget",
+    "version": "1.0.0",
+    "description": "缺预算时一次结构化追问后自动规划",
+    "tags": ["clarification", "missing_budget", "historical_regression"],
+    "user":{"initialMessage":"2026年8月1日10点从北京三里屯出发，两个人玩到18点。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"三里屯","partySize":2,"budgetPerPerson":300},"steps":[{"id":"answer-budget","trigger":{"kind":"phase","phase":"clarifying"},"action":{"type":"clarification_answers","answers":{"budgetPerPerson":300}},"once":true}]},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requiredIntent":{"budgetPerPerson":300},"requiredTools":["ask_clarification","validate_itinerary","calculate_budget","submit_plan"],"toolOrder":[{"before":"ask_clarification","after":"submit_plan"},{"before":"calculate_budget","after":"submit_plan"}],"maxToolCalls":{"ask_clarification":1,"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "clarify-missing-departure",
+    "version": "1.0.0",
+    "description": "缺出发地时一次追问",
+    "tags": ["clarification", "missing_departure"],
+    "user":{"initialMessage":"2026年8月1日10点，两个人在北京玩到18点，人均预算300元。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"三里屯","partySize":2,"budgetPerPerson":300},"steps":[{"id":"answer-departure","trigger":{"kind":"phase","phase":"clarifying"},"action":{"type":"clarification_answers","answers":{"departurePoint":"三里屯"}},"once":true}]},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requiredIntent":{"departurePoint":{"name":"三里屯","city":"北京"}},"requiredTools":["ask_clarification","validate_itinerary","calculate_budget","submit_plan"],"toolOrder":[{"before":"ask_clarification","after":"submit_plan"}],"maxToolCalls":{"ask_clarification":1,"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "clarify-missing-date",
+    "version": "1.0.0",
+    "description": "缺日期时一次追问",
+    "tags": ["clarification", "missing_date"],
+    "user":{"initialMessage":"上午10点从上海人民广场出发，2个人玩到18点，人均预算400元。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"人民广场","partySize":2,"budgetPerPerson":400},"steps":[{"id":"answer-date","trigger":{"kind":"phase","phase":"clarifying"},"action":{"type":"clarification_answers","answers":{"date":"2026-08-01"}},"once":true}]},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requiredIntent":{"date":"2026-08-01"},"requiredTools":["ask_clarification","validate_itinerary","calculate_budget","submit_plan"],"toolOrder":[{"before":"ask_clarification","after":"submit_plan"}],"maxToolCalls":{"ask_clarification":1,"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "clarify-missing-party",
+    "version": "1.0.0",
+    "description": "缺人数时一次追问",
+    "tags": ["clarification", "missing_party"],
+    "user":{"initialMessage":"2026年8月1日10点从深圳市民中心出发，玩到18点，人均预算300元。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"市民中心","partySize":2,"budgetPerPerson":300},"steps":[{"id":"answer-party","trigger":{"kind":"phase","phase":"clarifying"},"action":{"type":"clarification_answers","answers":{"partySize":2}},"once":true}]},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requiredIntent":{"partySize":2},"requiredTools":["ask_clarification","validate_itinerary","calculate_budget","submit_plan"],"toolOrder":[{"before":"ask_clarification","after":"submit_plan"}],"maxToolCalls":{"ask_clarification":1,"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "clarify-multiple-fields",
+    "version": "1.0.0",
+    "description": "多个缺失字段在同一卡片一次补齐",
+    "tags": ["clarification", "multiple_missing", "historical_regression"],
+    "user":{"initialMessage":"想在北京安排一次约会。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","departurePoint":"三里屯","partySize":2,"budgetPerPerson":300},"steps":[{"id":"answer-all","trigger":{"kind":"phase","phase":"clarifying"},"action":{"type":"clarification_answers","answers":{"date":"2026-08-01","startTime":"10:00","departurePoint":"三里屯","partySize":2,"budgetPerPerson":300}},"once":true}]},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requiredIntent":{"date":"2026-08-01","startTime":"10:00","partySize":2,"budgetPerPerson":300},"requiredTools":["ask_clarification","validate_itinerary","calculate_budget","submit_plan"],"toolOrder":[{"before":"ask_clarification","after":"submit_plan"}],"maxToolCalls":{"ask_clarification":1,"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "confirm-beijing-plan",
+    "version": "1.0.0",
+    "description": "结构化确认后提交并保存行程",
+    "tags": ["confirmation", "execution", "ics"],
+    "user":{"initialMessage":"2026年8月1日10点从北京三里屯出发，2个人玩到18点，人均预算300元。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"三里屯","partySize":2,"budgetPerPerson":300},"steps":[{"id":"confirm","trigger":{"kind":"phase","phase":"plan_confirm"},"action":{"type":"confirm_plan"},"once":true}]},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["completed"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requireWarningsPreserved":true,"requiredTools":["intent_parse","submit_plan","commit_itinerary","plan_save"],"toolOrder":[{"before":"submit_plan","after":"commit_itinerary"},{"before":"commit_itinerary","after":"plan_save"}],"maxToolCalls":{"submit_plan":1,"commit_itinerary":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "confirm-shanghai-plan",
+    "version": "1.0.0",
+    "description": "上海方案结构化确认",
+    "tags": ["confirmation", "execution", "shanghai"],
+    "user":{"initialMessage":"2026年8月1日10点从上海人民广场出发，2个人玩到18点，人均预算600元。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"人民广场","partySize":2,"budgetPerPerson":600},"steps":[{"id":"confirm","trigger":{"kind":"phase","phase":"plan_confirm"},"action":{"type":"confirm_plan"},"once":true}]},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["completed"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requireWarningsPreserved":true,"requiredTools":["intent_parse","submit_plan","commit_itinerary","plan_save"],"toolOrder":[{"before":"submit_plan","after":"commit_itinerary"},{"before":"commit_itinerary","after":"plan_save"}],"maxToolCalls":{"submit_plan":1,"commit_itinerary":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "confirm-shenzhen-plan",
+    "version": "1.0.0",
+    "description": "深圳方案结构化确认",
+    "tags": ["confirmation", "execution", "shenzhen"],
+    "user":{"initialMessage":"2026年8月1日10点从深圳市民中心出发，2个人玩到18点，人均预算500元。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"市民中心","partySize":2,"budgetPerPerson":500},"steps":[{"id":"confirm","trigger":{"kind":"phase","phase":"plan_confirm"},"action":{"type":"confirm_plan"},"once":true}]},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["completed"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requireWarningsPreserved":true,"requiredTools":["intent_parse","submit_plan","commit_itinerary","plan_save"],"toolOrder":[{"before":"submit_plan","after":"commit_itinerary"},{"before":"commit_itinerary","after":"plan_save"}],"maxToolCalls":{"submit_plan":1,"commit_itinerary":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "regression-single-submit",
+    "version": "1.0.0",
+    "description": "历史回归：完整方案只能提交一次",
+    "tags": ["historical_regression", "duplicate_submit"],
+    "user":{"initialMessage":"2026年8月1日10点从北京三里屯出发，情侣2人到18点，人均预算300元，请直接生成一个完整方案。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"三里屯","partySize":2,"budgetPerPerson":300}},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requiredTools":["intent_parse","validate_itinerary","calculate_budget","submit_plan"],"forbiddenTools":["commit_itinerary"],"toolOrder":[{"before":"validate_itinerary","after":"submit_plan"},{"before":"calculate_budget","after":"submit_plan"}],"maxToolCalls":{"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  },
+  {
+    "id": "regression-warning-preservation",
+    "version": "1.0.0",
+    "description": "历史回归：校验 warning 必须进入规范方案",
+    "tags": ["historical_regression", "warning", "grounding"],
+    "user":{"initialMessage":"2026年8月1日10点从上海静安寺出发，2个人到18点，人均预算500元；营业时间不确定时请保留提醒。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"静安寺","partySize":2,"budgetPerPerson":500}},
+    "environment":{"fixtureId":"mock-v1"},
+    "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requireWarningsPreserved":true,"requiredTools":["intent_parse","validate_itinerary","calculate_budget","submit_plan"],"toolOrder":[{"before":"validate_itinerary","after":"submit_plan"}],"maxToolCalls":{"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
+  }
+]

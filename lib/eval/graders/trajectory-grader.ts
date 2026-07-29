@@ -31,6 +31,20 @@ export function gradeTrajectory(scenario: EvalScenario, run: EvalRun): EvalCheck
     });
   }
 
+  for (const group of scenario.oracle.requiredToolGroups ?? []) {
+    const matched = group.anyOf.filter((name) => count(name) > 0);
+    checks.push({
+      id: `TRAJECTORY_REQUIRED_GROUP:${group.id}`,
+      category: "trajectory",
+      passed: matched.length > 0,
+      severity: "hard",
+      message: matched.length > 0
+        ? `${group.id} satisfied by ${matched.join(", ")}`
+        : `${group.id} requires one of: ${group.anyOf.join(", ")}`,
+      evidence: { anyOf: group.anyOf, matched },
+    });
+  }
+
   for (const name of scenario.oracle.forbiddenTools ?? []) {
     checks.push({
       id: `TRAJECTORY_FORBIDDEN_TOOL:${name}`,

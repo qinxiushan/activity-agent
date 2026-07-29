@@ -1,0 +1,8 @@
+{
+  "version": "eval-replay-v1",
+  "id": "mock-v1",
+  "providerKind": "mock",
+  "strictRequests": false,
+  "onMissing": "fallback",
+  "operations": {}
+}
