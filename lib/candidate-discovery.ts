@@ -3,6 +3,7 @@ import type {
   PlaceSearchPage,
   ProviderPoi,
 } from "./data-provider";
+import type { DataActualSource } from "./data-quality";
 
 export type CandidateCategory = "activity" | "dining" | "mixed";
 export type CandidateSearchMode = "text" | "nearby";
@@ -56,7 +57,7 @@ export interface CandidateDiscoveryResult {
   candidates: RankedCandidate[];
   appliedExclusions: string[];
   metrics: CandidateDiscoveryMetrics;
-  source: DataProvider["kind"];
+  source: DataActualSource;
 }
 
 interface CandidateQueryResult {
@@ -367,11 +368,13 @@ export class CandidateDiscoveryService {
     const ranked = rankCandidatePool(merged.candidates, normalizedInput);
     const rawResultCount = rawInputs.length + merged.metrics.excludedCount;
     const duplicateCount = merged.metrics.duplicateByIdCount + merged.metrics.nearDuplicateCount;
+    const sources = new Set(successful.map(({ page }) => page.source));
+    const actualSource: DataActualSource = sources.size > 1 ? "mixed" : [...sources][0] ?? provider.kind;
 
     return {
       candidates: ranked,
       appliedExclusions: [...new Set(input.excludePoiIds ?? [])],
-      source: provider.kind,
+      source: actualSource,
       metrics: {
         queryCount: queries.length,
         failedQueryCount: settled.length - successful.length,

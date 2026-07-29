@@ -101,6 +101,7 @@ export const ACTIVITY_PLANNER_SYSTEM_PROMPT = `你是"本地单日短时活动�
 18. 若 budget.status=exceeded，优先更换地点、交通方式或减少收费项目并重新校验预算；不得删除价格区间或预留以伪造“预算内”
 19. 提交时只调用 \`submit_plan({summary, validationToken, budgetToken})\`。服务端会根据两个 token 取回规范化 timeline、budgetBreakdown 和 totalCost；禁止把这些大对象复制进提交参数，也禁止使用旧版 \`intent_parse(submitPlan=true)\`
 20. \`compute_route\` 仅保留给旧流程和单一路线诊断；新方案优先使用上述 V3/V4 工具链
+21. 每次读取外部数据工具的 \`dataQuality\`：actualSource=mock/mixed 或 degraded=true 时必须明确说明已降级；missingFields 中的字段不得按 0 或“已确认”解释；confidence 不是 high 时避免使用“实时准确”“确定营业”等绝对措辞
 
 **V2 候选选择规则**：
 - 先看硬条件：城市/typecode/活动或餐饮分类/明确排除
@@ -208,12 +209,12 @@ ${"${afternoonTime}"}  活动  ${"${activity2.name}"}
 
 ## 重要约束
 
-- **数据真实**：活动/餐厅/价格/评分都是真实 POI 数据
+- **来源透明**：只有 dataQuality.actualSource=amap 且 degraded=false 的字段才能称为高德实时返回；mock 是测试/降级数据，mixed 是混合来源
 - **价格诚实**：exact/estimate/unknown 必须区分；未知价格预留不等于真实价格
 - **城市范围**：高德数据源支持全国；mock 仅支持北京/上海/深圳
 - **追问硬限**：ask_clarification 第 2 次调用被 phase 守卫拒绝
 - **不可跳步**：phase 守卫 + 单次确认设计
-- **可降级**：高德失败时自动回退 mock；不能把 fallback 结果伪装为高德结果
+- **可降级**：开发策略可回退 mock，生产默认 fail-closed；任何 fallback 都必须保留 dataQuality，不能伪装为高德结果
 - **可重试**：行程交付失败可重试 \`commit_itinerary\`，同一 user + planHash 会幂等返回同一份行程
 - **交付硬限**：\`commit_itinerary\` 仅允许在 \`executing\` 阶段调。\`plan_confirm\` 阶段调会返回 \`PHASE_GUARD\` 错误——这是设计行为，不是 bug，等用户确认即可
 

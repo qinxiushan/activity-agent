@@ -1,5 +1,5 @@
 /**
- * Activity Planner Tools - 12 个活动规划工具（SOP v2 重构）
+ * Activity Planner Tools - 23 个活动规划工具（SOP v2）
  *
  * 真实 SOP 工具集（用户新设计）：
  * - 阶段 1（意图）：
@@ -39,7 +39,8 @@ import {
   type PlanStateManager,
 } from "../../lib/plan-state";
 import { hashOf } from "../../lib/plan-reducer";
-import { getDataProvider } from "../../lib/data-provider-factory";
+import { getDataProvider, getDataProviderStatus } from "../../lib/data-provider-factory";
+import { assessDataQuality } from "../../lib/data-quality";
 import { getItineraryService } from "../../lib/itinerary-service";
 import { getUserPreferencesStore } from "../../lib/user-preferences";
 import { getCurrentUserId } from "../../lib/user-context";
@@ -488,6 +489,17 @@ function toolError(code: string, message: string) {
   };
 }
 
+function withDataQuality<T extends object>(
+  operation: string,
+  value: T,
+  requestedSource: "mock" | "amap",
+): T & { dataQuality: ReturnType<typeof assessDataQuality> } {
+  return {
+    ...value,
+    dataQuality: assessDataQuality(operation, value, requestedSource),
+  };
+}
+
 // ─── 工具注册表 ──────────────────────────────────────────────────
 
 export function getActivityPlannerTools(): ToolDefinition[] {
@@ -656,12 +668,14 @@ export function getActivityPlannerTools(): ToolDefinition[] {
             await mgr.dispatch({ type: "INTENT_FIELDS_UPDATED", missingCount: missing.length });
           }
 
+          const providerStatus = getDataProviderStatus();
           return {
             content: [{ type: "text" as const, text: JSON.stringify({
               saved: true,
               intent: mgr.intent,
               autoFilledFields,
-              supportedCities: getDataProvider().kind === "amap" ? "全国（高德）" : "北京、上海、深圳（mock）",
+              supportedCities: providerStatus.activeSource === "amap" ? "全国（高德）" : "北京、上海、深圳（mock）",
+              dataProvider: providerStatus,
               currentPhase: mgr.currentPhase,
               note: autoFilledFields.length > 0
                 ? `已用用户偏好自动填充 ${autoFilledFields.length} 个字段：${autoFilledFields.join("、")}。请在回复中告知用户，并允许覆盖。`
@@ -671,11 +685,13 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           };
         }
 
+        const providerStatus = getDataProviderStatus();
         return {
           content: [{ type: "text" as const, text: JSON.stringify({
             saved: true,
             intent: params,
-            supportedCities: getDataProvider().kind === "amap" ? "全国（高德）" : "北京、上海、深圳（mock）",
+            supportedCities: providerStatus.activeSource === "amap" ? "全国（高德）" : "北京、上海、深圳（mock）",
+            dataProvider: providerStatus,
             currentPhase: "unknown",
             note: "若关键字段缺失，调用 ask_clarification 一次性追问（最多 1 次）",
           }, null, 2) }],
@@ -767,8 +783,9 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       parameters: detectUserRegionSchema,
       execute: async () => {
         const clientIp = getActivePlanState()?.clientIp;
-        const result = clientIp
-          ? await getDataProvider().locateIp(clientIp)
+        const provider = clientIp ? getDataProvider() : null;
+        const result = clientIp && provider
+          ? await provider.locateIp(clientIp)
           : {
               available: false,
               accuracy: "unknown" as const,
@@ -776,9 +793,14 @@ export function getActivityPlannerTools(): ToolDefinition[] {
               source: "unavailable" as const,
               reason: "没有可信公网 IP；本地开发或 TRUST_PROXY_HEADERS 未启用",
             };
+        const details = withDataQuality(
+          "ip_location",
+          result,
+          provider?.kind ?? getDataProviderStatus().requestedSource,
+        );
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          details: result,
+          content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }],
+          details,
         };
       },
     },
@@ -790,8 +812,10 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       promptSnippet: "地理编码出发地",
       parameters: geocodeSchema,
       execute: async (_id, params: Static<typeof geocodeSchema>) => {
-        const result = await getDataProvider().geocode(params.address, params.city);
-        return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }], details: result };
+        const provider = getDataProvider();
+        const result = await provider.geocode(params.address, params.city);
+        const details = withDataQuality("geocode", result, provider.kind);
+        return { content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }], details };
       },
     },
 
@@ -802,10 +826,12 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       promptSnippet: "逆地理编码",
       parameters: reverseGeocodeSchema,
       execute: async (_id, params: Static<typeof reverseGeocodeSchema>) => {
-        const result = await getDataProvider().reverseGeocode({ lng: params.lng, lat: params.lat });
+        const provider = getDataProvider();
+        const result = await provider.reverseGeocode({ lng: params.lng, lat: params.lat });
+        const details = withDataQuality("reverse_geocode", result, provider.kind);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          details: result,
+          content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }],
+          details,
         };
       },
     },
@@ -817,10 +843,12 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       promptSnippet: "查天气",
       parameters: getWeatherSchema,
       execute: async (_id, params: Static<typeof getWeatherSchema>) => {
-        const w = await getDataProvider().getWeather(params.city, params.date);
+        const provider = getDataProvider();
+        const w = await provider.getWeather(params.city, params.date);
+        const details = withDataQuality("weather", w, provider.kind);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(w, null, 2) }],
-          details: w,
+          content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }],
+          details,
         };
       },
     },
@@ -833,9 +861,10 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       parameters: discoverPlaceCandidatesSchema,
       execute: async (_id, params: Static<typeof discoverPlaceCandidatesSchema>) => {
         const mgr = getActivePlanState();
+        const provider = getDataProvider();
         const appliedExclusions = mgr?.candidateExclusions(params.excludePoiIds ?? []) ??
           [...new Set(params.excludePoiIds ?? [])];
-        const result = await candidateDiscovery.discover(getDataProvider(), {
+        const result = await candidateDiscovery.discover(provider, {
           city: params.city,
           center: params.center,
           keywords: params.keywords,
@@ -847,7 +876,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           excludePoiIds: appliedExclusions,
           modes: params.modes,
         });
-        const details = {
+        const details = withDataQuality("candidate_discovery", {
           ...result,
           sessionRecommendedPoiIds: mgr?.recommendedPoiIds ?? [],
           candidates: result.candidates.map((candidate) => ({
@@ -858,7 +887,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
             searchModes: candidate.searchModes,
             ...serializePlace(candidate.poi),
           })),
-        };
+        }, provider.kind);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }],
           details,
@@ -873,7 +902,8 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       promptSnippet: "关键词搜索 POI",
       parameters: searchPlacesTextSchema,
       execute: async (_id, params: Static<typeof searchPlacesTextSchema>) => {
-        const result = await getDataProvider().searchPlacesText({
+        const provider = getDataProvider();
+        const result = await provider.searchPlacesText({
           keywords: params.keywords,
           city: params.city,
           types: params.types,
@@ -881,7 +911,10 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           pageSize: params.pageSize,
           excludePoiIds: params.excludePoiIds,
         });
-        const details = { ...result, pois: result.pois.map(serializePlace) };
+        const details = withDataQuality("place_search_text", {
+          ...result,
+          pois: result.pois.map(serializePlace),
+        }, provider.kind);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }],
           details,
@@ -896,7 +929,8 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       promptSnippet: "周边搜索 POI",
       parameters: searchPlacesNearbySchema,
       execute: async (_id, params: Static<typeof searchPlacesNearbySchema>) => {
-        const result = await getDataProvider().searchPlacesNearby({
+        const provider = getDataProvider();
+        const result = await provider.searchPlacesNearby({
           location: params.location,
           keywords: params.keywords,
           types: params.types,
@@ -905,7 +939,10 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           pageSize: params.pageSize,
           excludePoiIds: params.excludePoiIds,
         });
-        const details = { ...result, pois: result.pois.map(serializePlace) };
+        const details = withDataQuality("place_search_nearby", {
+          ...result,
+          pois: result.pois.map(serializePlace),
+        }, provider.kind);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }],
           details,
@@ -921,13 +958,14 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       parameters: getPlaceDetailsSchema,
       execute: async (_id, params: Static<typeof getPlaceDetailsSchema>) => {
         const uniqueIds = [...new Set(params.poiIds)].slice(0, 10);
-        const places = await getDataProvider().getPlaceDetails(uniqueIds);
-        const details = {
+        const provider = getDataProvider();
+        const places = await provider.getPlaceDetails(uniqueIds);
+        const details = withDataQuality("place_details", {
           requested: uniqueIds.length,
           found: places.length,
           missingPoiIds: uniqueIds.filter((id) => !places.some((poi) => poi.id === id)),
           places: places.map(serializePlace),
-        };
+        }, provider.kind);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }],
           details,
@@ -942,7 +980,8 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       promptSnippet: "搜索活动 POI",
       parameters: searchActivitiesSchema,
       execute: async (_id, params: Static<typeof searchActivitiesSchema>) => {
-        const results = await getDataProvider().searchActivities({
+        const provider = getDataProvider();
+        const results = await provider.searchActivities({
           city: params.city,
           district: params.district,
           category: params.category as "outdoor" | "cultural" | "shopping" | "entertainment" | undefined,
@@ -954,8 +993,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           limit: params.limit ?? 5,
           preferIndoor: params.preferIndoor,
         });
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({
+        const payload = withDataQuality("activity_search", {
             count: results.length,
             activities: results.map((r) => ({
               id: r.poi.id,
@@ -968,10 +1006,13 @@ export function getActivityPlannerTools(): ToolDefinition[] {
               distanceMeters: r.distanceMeters,
               relevanceScore: r.score,
               openingHours: r.poi.openingHours ?? "未知",
+              source: r.poi.source,
               tags: r.poi.tags,
               description: r.poi.description,
             })),
-          }, null, 2) }],
+        }, provider.kind);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
           details: results,
         };
       },
@@ -984,7 +1025,8 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       promptSnippet: "搜索餐厅 POI",
       parameters: searchRestaurantsSchema,
       execute: async (_id, params: Static<typeof searchRestaurantsSchema>) => {
-        const results = await getDataProvider().searchRestaurants({
+        const provider = getDataProvider();
+        const results = await provider.searchRestaurants({
           city: params.city,
           district: params.district,
           cuisine: params.cuisine,
@@ -996,8 +1038,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           minRating: params.minRating,
           limit: params.limit ?? 5,
         });
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({
+        const payload = withDataQuality("restaurant_search", {
             count: results.length,
             restaurants: results.map((r) => ({
               id: r.poi.id,
@@ -1010,11 +1051,14 @@ export function getActivityPlannerTools(): ToolDefinition[] {
               distanceMeters: r.distanceMeters,
               relevanceScore: r.score,
               openingHours: r.poi.openingHours ?? "未知",
+              source: r.poi.source,
               signature: r.poi.signature ?? [],
               dietaryOptions: r.poi.dietaryOptions ?? [],
               description: r.poi.description,
             })),
-          }, null, 2) }],
+        }, provider.kind);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
           details: results,
         };
       },
@@ -1027,12 +1071,12 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       promptSnippet: "营业时间校验",
       parameters: checkOpeningHoursSchema,
       execute: async (_id, params: Static<typeof checkOpeningHoursSchema>) => {
-        const result = await getDataProvider().checkOpeningHours(params.poiId, params.datetime);
+        const provider = getDataProvider();
+        const result = await provider.checkOpeningHours(params.poiId, params.datetime);
+        const details = withDataQuality("opening_hours", result, provider.kind);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify({
-            ...result,
-          }, null, 2) }],
-          details: result,
+          content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }],
+          details,
         };
       },
     },
@@ -1079,9 +1123,10 @@ export function getActivityPlannerTools(): ToolDefinition[] {
         const toCoord = { id: toPoi.id, name: toPoi.name, lng: toPoi.lng, lat: toPoi.lat };
         const mode = params.mode as "walking" | "transit" | "driving" | "bicycling" | undefined;
         const route = await provider.computeRoute(fromCoord, toCoord, mode);
+        const details = withDataQuality("route", route, provider.kind);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(route, null, 2) }],
-          details: route,
+          content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }],
+          details,
         };
       },
     },
@@ -1093,16 +1138,18 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       promptSnippet: "四模式路线比较",
       parameters: compareRouteOptionsSchema,
       execute: async (_id, params: Static<typeof compareRouteOptionsSchema>) => {
+        const provider = getDataProvider();
         const [from, to] = await Promise.all([resolveRoutePoint(params.from), resolveRoutePoint(params.to)]);
-        const result = await new RoutePlanningService(getDataProvider()).compare(from, to, {
+        const result = await new RoutePlanningService(provider).compare(from, to, {
           modes: params.modes,
           priority: params.priority,
           weatherCondition: params.weatherCondition,
           maxWalkingMinutes: params.maxWalkingMinutes,
         });
+        const details = withDataQuality("route_comparison", result, provider.kind);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          details: result,
+          content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }],
+          details,
         };
       },
     },
@@ -1114,18 +1161,20 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       promptSnippet: "多点距离矩阵",
       parameters: distanceMatrixSchema,
       execute: async (_id, params: Static<typeof distanceMatrixSchema>) => {
+        const provider = getDataProvider();
         const points = await Promise.all(params.points.map(resolveRoutePoint));
         if (!points.some((point) => point.id === params.startId)) throw new Error("startId is not present in points");
         if (params.fixedEndId && !points.some((point) => point.id === params.fixedEndId)) throw new Error("fixedEndId is not present in points");
-        const result = await new RoutePlanningService(getDataProvider()).matrix(
+        const result = await new RoutePlanningService(provider).matrix(
           points,
           params.mode ?? "driving",
           params.startId,
           params.fixedEndId,
         );
+        const details = withDataQuality("distance_matrix", result, provider.kind);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          details: result,
+          content: [{ type: "text" as const, text: JSON.stringify(details, null, 2) }],
+          details,
         };
       },
     },

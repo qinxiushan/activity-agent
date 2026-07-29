@@ -31,6 +31,11 @@ import { BudgetService } from "../lib/budget-service";
 import { hasAdaptivePriceRange, inferCostPriorKey } from "../lib/cost-resolver";
 import { MockDataProvider } from "../lib/mock-data-provider";
 import { assessDataQuality, attachFallbackQuality } from "../lib/data-quality";
+import {
+  getDataProvider,
+  getDataProviderStatus,
+  resetDataProviderForTests,
+} from "../lib/data-provider-factory";
 import { isOpenAt, parseHoursString } from "../lib/opening-hours-service";
 import { UserPreferencesStore, DEFAULT_USER_ID, type UserPreferencesDefaults, type UserPreferences } from "../lib/user-preferences";
 import {
@@ -144,6 +149,28 @@ async function main() {
   const degradedQuality = assessDataQuality("weather", degradedWeather, "amap");
   log("AMap fallback is marked degraded", degradedQuality.degraded && degradedQuality.actualSource === "mock");
   log("AMap fallback preserves failure reason", degradedQuality.degradationReason === "upstream timeout");
+  const oldDataSource = process.env.DATA_SOURCE;
+  const oldAmapKey = process.env.AMAP_MAPS_API_KEY;
+  const oldFallbackPolicy = process.env.DATA_FALLBACK_POLICY;
+  process.env.DATA_SOURCE = "amap";
+  delete process.env.AMAP_MAPS_API_KEY;
+  process.env.DATA_FALLBACK_POLICY = "allow_mock";
+  resetDataProviderForTests();
+  const allowedFallbackStatus = getDataProviderStatus();
+  log("Dev fallback reports requested AMap and active mock",
+    allowedFallbackStatus.requestedSource === "amap" &&
+    allowedFallbackStatus.activeSource === "mock" &&
+    !allowedFallbackStatus.configured);
+  log("Dev fallback returns the explicit mock provider", getDataProvider().kind === "mock");
+  process.env.DATA_FALLBACK_POLICY = "fail_closed";
+  resetDataProviderForTests();
+  let failedClosed = false;
+  try { getDataProvider(); } catch { failedClosed = true; }
+  log("Fail-closed rejects missing AMap credentials", failedClosed);
+  restoreEnv("DATA_SOURCE", oldDataSource);
+  restoreEnv("AMAP_MAPS_API_KEY", oldAmapKey);
+  restoreEnv("DATA_FALLBACK_POLICY", oldFallbackPolicy);
+  resetDataProviderForTests();
 
   // ─── V2：候选池去重与多样性重排 ───────────────────────
   section("V2 Candidate Discovery");
@@ -598,6 +625,8 @@ async function main() {
     log("IP location is honest when no trusted public IP",
       (regionResult.details as { available?: boolean; canUseAsExactDeparture?: boolean })?.available === false &&
       (regionResult.details as { canUseAsExactDeparture?: boolean })?.canUseAsExactDeparture === false);
+    log("IP location exposes data quality",
+      (regionResult.details as { dataQuality?: { actualSource?: string } })?.dataQuality?.actualSource === "unavailable");
   }
 
   const textSearchTool = tools.find((t) => t.name === "search_places_text");
@@ -611,6 +640,9 @@ async function main() {
     const pois = (searchResult.details as { pois?: Array<{ id: string; links?: { amapPlace?: string } }> })?.pois ?? [];
     log("V1 text search returns structured POIs", pois.length > 0);
     log("V1 search generates allowlisted Amap links", pois.every((poi) => poi.links?.amapPlace?.startsWith("https://uri.amap.com/")));
+    log("V1 text search exposes data quality",
+      (searchResult.details as { dataQuality?: { actualSource?: string; freshness?: string } }).dataQuality?.actualSource === "mock" &&
+      (searchResult.details as { dataQuality?: { freshness?: string } }).dataQuality?.freshness === "synthetic");
     const detailResult = await withPlanState(mgrSearch, () =>
       detailTool.execute!("id", { poiIds: pois.slice(0, 2).map((poi) => poi.id) }, undefined, undefined, {} as never));
     log("V1 detail lookup is batched", (detailResult.details as { found?: number })?.found === Math.min(2, pois.length));

@@ -22,6 +22,40 @@ const mockProvider = new MockDataProvider();
 let amapProvider: AmapDataProvider | undefined;
 let resilientAmapProvider: DataProvider | undefined;
 
+export type DataFallbackPolicy = "allow_mock" | "fail_closed";
+
+export interface DataProviderStatus {
+  requestedSource: "mock" | "amap";
+  activeSource: "mock" | "amap" | "unavailable";
+  fallbackPolicy: DataFallbackPolicy;
+  configured: boolean;
+  warning?: string;
+}
+
+export function getDataFallbackPolicy(): DataFallbackPolicy {
+  const configured = process.env.DATA_FALLBACK_POLICY;
+  if (configured === "allow_mock" || configured === "fail_closed") return configured;
+  return process.env.NODE_ENV === "production" ? "fail_closed" : "allow_mock";
+}
+
+export function getDataProviderStatus(): DataProviderStatus {
+  const requestedSource = process.env.DATA_SOURCE === "amap" ? "amap" : "mock";
+  const fallbackPolicy = getDataFallbackPolicy();
+  if (requestedSource === "mock") {
+    return { requestedSource, activeSource: "mock", fallbackPolicy, configured: true };
+  }
+  if (!process.env.AMAP_MAPS_API_KEY) {
+    return {
+      requestedSource,
+      activeSource: fallbackPolicy === "allow_mock" ? "mock" : "unavailable",
+      fallbackPolicy,
+      configured: false,
+      warning: "DATA_SOURCE=amap but AMAP_MAPS_API_KEY is missing",
+    };
+  }
+  return { requestedSource, activeSource: "amap", fallbackPolicy, configured: true };
+}
+
 class FallbackDataProvider implements DataProvider {
   readonly kind = "amap" as const;
   constructor(private readonly primary: DataProvider, private readonly fallback: DataProvider) {}
@@ -48,9 +82,21 @@ class FallbackDataProvider implements DataProvider {
 }
 
 export function getDataProvider(): DataProvider {
-  if (process.env.DATA_SOURCE !== "amap") return mockProvider;
-  if (!process.env.AMAP_MAPS_API_KEY) return mockProvider;
-  amapProvider ??= new AmapDataProvider(process.env.AMAP_MAPS_API_KEY, mockProvider);
+  const status = getDataProviderStatus();
+  if (status.requestedSource === "mock") return mockProvider;
+  if (!status.configured) {
+    if (status.fallbackPolicy === "fail_closed") throw new Error(status.warning);
+    return mockProvider;
+  }
+  const apiKey = process.env.AMAP_MAPS_API_KEY;
+  if (!apiKey) throw new Error("AMAP_MAPS_API_KEY became unavailable after provider validation");
+  amapProvider ??= new AmapDataProvider(apiKey, mockProvider);
+  if (status.fallbackPolicy === "fail_closed") return amapProvider;
   resilientAmapProvider ??= new FallbackDataProvider(amapProvider, mockProvider);
   return resilientAmapProvider;
+}
+
+export function resetDataProviderForTests(): void {
+  amapProvider = undefined;
+  resilientAmapProvider = undefined;
 }
