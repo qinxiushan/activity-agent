@@ -1,0 +1,346 @@
+{
+  "schemaVersion": "preference-dataset-v2",
+  "name": "activity-agent-preference-seed-v2",
+  "description": "Eval V2 盲评试运行集。标签为 seed，必须经人工复核后才能用于 Judge 校准。",
+  "examples": [
+    {
+      "id": "pref-budget-hard-limit",
+      "version": "1.0.0",
+      "tags": ["北京", "预算", "hard-constraint"],
+      "userRequest": "两个人从三里屯出发，人均预算200元，安排半天文化活动和晚餐，不能超预算。",
+      "criteria": ["人均不超过200元", "包含文化活动和晚餐"],
+      "candidateA": {
+        "id": "budget-safe",
+        "summary": "小型美术馆与平价晚餐，保留预算余量。",
+        "timeline": [
+          {"startTime": "14:00", "endTime": "14:20", "type": "transit", "name": "步行前往美术馆"},
+          {"startTime": "14:20", "endTime": "16:20", "type": "activity", "name": "社区美术馆"},
+          {"startTime": "17:00", "endTime": "18:00", "type": "meal", "name": "家常菜餐厅"}
+        ],
+        "budget": {"min": 260, "likely": 330, "max": 390, "perPerson": 165, "status": "within", "basis": ["活动免费", "餐饮区间估价"]},
+        "warnings": ["餐厅实际消费以菜单为准"]
+      },
+      "candidateB": {
+        "id": "budget-over",
+        "summary": "热门展览与精品餐厅，但预计明显超过预算。",
+        "timeline": [
+          {"startTime": "14:00", "endTime": "14:30", "type": "transit", "name": "驾车前往展馆"},
+          {"startTime": "14:30", "endTime": "16:30", "type": "activity", "name": "热门商业展览"},
+          {"startTime": "17:00", "endTime": "18:30", "type": "meal", "name": "精品融合餐厅"}
+        ],
+        "budget": {"min": 480, "likely": 620, "max": 760, "perPerson": 310, "status": "exceeded", "basis": ["展览票价", "餐饮估价"]}
+      },
+      "annotation": {"status": "seed", "label": "a", "rubricVersion": "activity-preference-v2", "confidence": 0.98, "rationale": "A满足硬预算，B明确超支。"}
+    },
+    {
+      "id": "pref-rain-indoor",
+      "version": "1.0.0",
+      "tags": ["上海", "雨天", "weather"],
+      "userRequest": "上海周六有大雨，带朋友玩一天，希望尽量室内并减少淋雨。",
+      "criteria": ["雨天可执行", "减少露天步行"],
+      "candidateA": {
+        "id": "outdoor-heavy",
+        "summary": "滨江步道、露天市集和跨街区步行。",
+        "timeline": [
+          {"startTime": "10:00", "endTime": "12:00", "type": "activity", "name": "滨江步道"},
+          {"startTime": "12:00", "endTime": "12:40", "type": "transit", "name": "步行跨街区"},
+          {"startTime": "13:00", "endTime": "15:00", "type": "activity", "name": "露天市集"}
+        ],
+        "budget": {"min": 180, "likely": 240, "max": 320, "perPerson": 120, "status": "within"},
+        "warnings": ["大雨可能影响露天活动"]
+      },
+      "candidateB": {
+        "id": "indoor-linked",
+        "summary": "地铁串联博物馆、商场餐厅和室内演出。",
+        "timeline": [
+          {"startTime": "10:00", "endTime": "12:00", "type": "activity", "name": "上海博物馆"},
+          {"startTime": "12:00", "endTime": "12:20", "type": "transit", "name": "地铁一站"},
+          {"startTime": "12:30", "endTime": "14:00", "type": "meal", "name": "商场餐厅"},
+          {"startTime": "15:00", "endTime": "17:00", "type": "activity", "name": "室内演出"}
+        ],
+        "budget": {"min": 300, "likely": 420, "max": 560, "perPerson": 210, "status": "within"},
+        "warnings": ["演出票价需下单前确认"]
+      },
+      "annotation": {"status": "seed", "label": "b", "rubricVersion": "activity-preference-v2", "confidence": 0.95, "rationale": "B更符合大雨和少淋雨要求。"}
+    },
+    {
+      "id": "pref-route-feasibility",
+      "version": "1.0.0",
+      "tags": ["深圳", "路线", "feasibility"],
+      "userRequest": "从深圳大学城出发，14点到18点玩半天，不想把时间浪费在路上。",
+      "criteria": ["总交通时间尽量短", "18点前结束"],
+      "candidateA": {
+        "id": "compact-route",
+        "summary": "大学城周边两个相邻活动点。",
+        "timeline": [
+          {"startTime": "14:00", "endTime": "14:15", "type": "transit", "name": "步行前往展馆"},
+          {"startTime": "14:15", "endTime": "16:00", "type": "activity", "name": "大学城展馆"},
+          {"startTime": "16:10", "endTime": "17:40", "type": "activity", "name": "附近书店"}
+        ],
+        "budget": {"min": 80, "likely": 130, "max": 200, "perPerson": 130, "status": "within"}
+      },
+      "candidateB": {
+        "id": "cross-city-route",
+        "summary": "跨区串联三个热门点，交通占比很高。",
+        "timeline": [
+          {"startTime": "14:00", "endTime": "15:20", "type": "transit", "name": "前往海上世界"},
+          {"startTime": "15:20", "endTime": "16:10", "type": "activity", "name": "海上世界"},
+          {"startTime": "16:10", "endTime": "17:30", "type": "transit", "name": "前往大梅沙"},
+          {"startTime": "17:30", "endTime": "18:30", "type": "activity", "name": "大梅沙"}
+        ],
+        "budget": {"min": 180, "likely": 280, "max": 420, "perPerson": 280, "status": "within"},
+        "warnings": ["预计18:30结束"]
+      },
+      "annotation": {"status": "seed", "label": "a", "rubricVersion": "activity-preference-v2", "confidence": 0.99, "rationale": "A路线紧凑且按时结束，B违反结束时间。"}
+    },
+    {
+      "id": "pref-dietary-vegetarian",
+      "version": "1.0.0",
+      "tags": ["北京", "饮食限制", "personalization"],
+      "userRequest": "和朋友在北京玩一天，其中一人严格素食，午餐需要有可靠的纯素选择。",
+      "criteria": ["午餐具有明确纯素选择"],
+      "candidateA": {
+        "id": "generic-hotpot",
+        "summary": "景点后安排普通火锅，未确认锅底和蘸料。",
+        "timeline": [
+          {"startTime": "10:00", "endTime": "12:00", "type": "activity", "name": "艺术馆"},
+          {"startTime": "12:00", "endTime": "12:20", "type": "transit", "name": "步行"},
+          {"startTime": "12:20", "endTime": "13:40", "type": "meal", "name": "普通火锅"}
+        ],
+        "budget": {"min": 260, "likely": 360, "max": 480, "perPerson": 180, "status": "within"},
+        "warnings": ["需要现场询问是否可做纯素"]
+      },
+      "candidateB": {
+        "id": "vegan-confirmed",
+        "summary": "景点后安排菜单明确标注的纯素餐厅。",
+        "timeline": [
+          {"startTime": "10:00", "endTime": "12:00", "type": "activity", "name": "艺术馆"},
+          {"startTime": "12:00", "endTime": "12:15", "type": "transit", "name": "步行"},
+          {"startTime": "12:15", "endTime": "13:30", "type": "meal", "name": "纯素餐厅"}
+        ],
+        "budget": {"min": 300, "likely": 380, "max": 460, "perPerson": 190, "status": "within"},
+        "warnings": ["到店前再次确认交叉污染"]
+      },
+      "annotation": {"status": "seed", "label": "b", "rubricVersion": "activity-preference-v2", "confidence": 0.96, "rationale": "B直接满足严格素食约束。"}
+    },
+    {
+      "id": "pref-couple-personalization",
+      "version": "1.0.0",
+      "tags": ["上海", "情侣", "personalization"],
+      "userRequest": "情侣纪念日在上海约会，喜欢摄影和安静空间，不想去拥挤网红点。",
+      "criteria": ["适合摄影", "相对安静", "避开拥挤网红点"],
+      "candidateA": {
+        "id": "quiet-photo",
+        "summary": "小型摄影展、安静花园和预约制餐厅。",
+        "timeline": [
+          {"startTime": "14:00", "endTime": "15:30", "type": "activity", "name": "摄影艺术空间"},
+          {"startTime": "15:45", "endTime": "17:00", "type": "activity", "name": "社区花园"},
+          {"startTime": "17:30", "endTime": "19:00", "type": "meal", "name": "预约制餐厅"}
+        ],
+        "budget": {"min": 420, "likely": 560, "max": 720, "perPerson": 280, "status": "within"}
+      },
+      "candidateB": {
+        "id": "viral-checklist",
+        "summary": "连续打卡三个热门商圈机位。",
+        "timeline": [
+          {"startTime": "14:00", "endTime": "15:00", "type": "activity", "name": "热门街区"},
+          {"startTime": "15:30", "endTime": "16:30", "type": "activity", "name": "网红天台"},
+          {"startTime": "17:00", "endTime": "18:00", "type": "activity", "name": "热门商场"}
+        ],
+        "budget": {"min": 300, "likely": 500, "max": 800, "perPerson": 250, "status": "within"},
+        "warnings": ["周末排队和拥挤程度未知"]
+      },
+      "annotation": {"status": "seed", "label": "a", "rubricVersion": "activity-preference-v2", "confidence": 0.9, "rationale": "A针对摄影、安静和纪念日做了组合。"}
+    },
+    {
+      "id": "pref-activity-diversity",
+      "version": "1.0.0",
+      "tags": ["深圳", "朋友", "diversity"],
+      "userRequest": "三个朋友在深圳玩一天，想要文化、轻运动和本地美食，不想一整天都逛商场。",
+      "criteria": ["覆盖文化、轻运动、本地美食", "避免活动重复"],
+      "candidateA": {
+        "id": "mall-repeat",
+        "summary": "三个相邻商场连续逛街。",
+        "timeline": [
+          {"startTime": "10:00", "endTime": "12:00", "type": "activity", "name": "商场A"},
+          {"startTime": "13:00", "endTime": "15:00", "type": "activity", "name": "商场B"},
+          {"startTime": "15:30", "endTime": "17:30", "type": "activity", "name": "商场C"}
+        ],
+        "budget": {"min": 300, "likely": 600, "max": 1200, "perPerson": 200, "status": "within"}
+      },
+      "candidateB": {
+        "id": "mixed-day",
+        "summary": "博物馆、绿道骑行和本地餐馆。",
+        "timeline": [
+          {"startTime": "10:00", "endTime": "12:00", "type": "activity", "name": "城市博物馆"},
+          {"startTime": "13:30", "endTime": "15:00", "type": "activity", "name": "滨海绿道骑行"},
+          {"startTime": "16:00", "endTime": "17:30", "type": "meal", "name": "本地客家菜"}
+        ],
+        "budget": {"min": 420, "likely": 600, "max": 780, "perPerson": 200, "status": "within"},
+        "warnings": ["雨天骑行需替换为室内活动"]
+      },
+      "annotation": {"status": "seed", "label": "b", "rubricVersion": "activity-preference-v2", "confidence": 0.97, "rationale": "B完整覆盖三类需求且重复度低。"}
+    },
+    {
+      "id": "pref-cost-transparency",
+      "version": "1.0.0",
+      "tags": ["北京", "费用透明", "budget"],
+      "userRequest": "北京家庭四人一日游，人均预算300元，价格不确定也可以，但要说清楚。",
+      "criteria": ["预算可审计", "未知价格明确披露"],
+      "candidateA": {
+        "id": "auditable-range",
+        "summary": "逐项给出门票、交通和餐饮区间，并标出未知项。",
+        "timeline": [
+          {"startTime": "09:30", "endTime": "11:30", "type": "activity", "name": "科技馆"},
+          {"startTime": "12:00", "endTime": "13:30", "type": "meal", "name": "家庭餐厅"},
+          {"startTime": "14:00", "endTime": "16:00", "type": "activity", "name": "公园"}
+        ],
+        "budget": {"min": 760, "likely": 980, "max": 1240, "perPerson": 245, "status": "within", "basis": ["门票已知", "餐饮同类区间", "公交估价"]},
+        "warnings": ["儿童票政策和餐饮实际点单待确认"]
+      },
+      "candidateB": {
+        "id": "single-number",
+        "summary": "只给出总价约900元，没有费用构成。",
+        "timeline": [
+          {"startTime": "09:30", "endTime": "11:30", "type": "activity", "name": "科技馆"},
+          {"startTime": "12:00", "endTime": "13:30", "type": "meal", "name": "家庭餐厅"},
+          {"startTime": "14:00", "endTime": "16:00", "type": "activity", "name": "公园"}
+        ],
+        "budget": {"min": 900, "likely": 900, "max": 900, "perPerson": 225, "status": "within"}
+      },
+      "annotation": {"status": "seed", "label": "a", "rubricVersion": "activity-preference-v2", "confidence": 0.92, "rationale": "A对不确定价格有区间、来源和提醒。"}
+    },
+    {
+      "id": "pref-return-to-start",
+      "version": "1.0.0",
+      "tags": ["上海", "终点", "hard-constraint"],
+      "userRequest": "从人民广场出发玩到18点，结束后必须回人民广场取行李。",
+      "criteria": ["18点前回到人民广场"],
+      "candidateA": {
+        "id": "ends-remote",
+        "summary": "18点在浦东最后一个景点结束。",
+        "timeline": [
+          {"startTime": "14:00", "endTime": "16:00", "type": "activity", "name": "浦东美术馆"},
+          {"startTime": "16:20", "endTime": "18:00", "type": "activity", "name": "陆家嘴观景"}
+        ],
+        "budget": {"min": 240, "likely": 360, "max": 480, "perPerson": 360, "status": "within"},
+        "warnings": ["未安排返回人民广场"]
+      },
+      "candidateB": {
+        "id": "returns-start",
+        "summary": "压缩最后活动并预留地铁返程。",
+        "timeline": [
+          {"startTime": "14:00", "endTime": "16:00", "type": "activity", "name": "浦东美术馆"},
+          {"startTime": "16:15", "endTime": "17:10", "type": "activity", "name": "陆家嘴短途散步"},
+          {"startTime": "17:10", "endTime": "17:50", "type": "transit", "name": "地铁返回人民广场"}
+        ],
+        "budget": {"min": 220, "likely": 320, "max": 420, "perPerson": 320, "status": "within"}
+      },
+      "annotation": {"status": "seed", "label": "b", "rubricVersion": "activity-preference-v2", "confidence": 0.99, "rationale": "只有B满足必须返回起点的硬约束。"}
+    },
+    {
+      "id": "pref-equivalent-cultural",
+      "version": "1.0.0",
+      "tags": ["北京", "tie", "culture"],
+      "userRequest": "北京下午安排两个小时室内文化活动，预算宽松，博物馆或美术馆都可以。",
+      "criteria": ["室内文化活动", "约两个小时"],
+      "candidateA": {
+        "id": "museum-option",
+        "summary": "两小时城市历史博物馆参观。",
+        "timeline": [{"startTime": "14:00", "endTime": "16:00", "type": "activity", "name": "城市历史博物馆"}],
+        "budget": {"min": 0, "likely": 30, "max": 60, "perPerson": 30, "status": "within"},
+        "warnings": ["需提前预约"]
+      },
+      "candidateB": {
+        "id": "gallery-option",
+        "summary": "两小时当代美术馆参观。",
+        "timeline": [{"startTime": "14:00", "endTime": "16:00", "type": "activity", "name": "当代美术馆"}],
+        "budget": {"min": 0, "likely": 40, "max": 80, "perPerson": 40, "status": "within"},
+        "warnings": ["需提前预约"]
+      },
+      "annotation": {"status": "seed", "label": "tie", "rubricVersion": "activity-preference-v2", "confidence": 0.8, "rationale": "用户对两种文化活动无进一步偏好，质量接近。"}
+    },
+    {
+      "id": "pref-family-pace-tie",
+      "version": "1.0.0",
+      "tags": ["深圳", "家庭", "tie"],
+      "userRequest": "深圳亲子半日游，一个6岁孩子，想安排一个主活动和休息，预算300元/人。",
+      "criteria": ["节奏适合儿童", "包含休息"],
+      "candidateA": {
+        "id": "science-family",
+        "summary": "儿童科学馆加一小时公园休息。",
+        "timeline": [
+          {"startTime": "14:00", "endTime": "16:00", "type": "activity", "name": "儿童科学馆"},
+          {"startTime": "16:15", "endTime": "17:15", "type": "rest", "name": "附近公园"}
+        ],
+        "budget": {"min": 180, "likely": 260, "max": 360, "perPerson": 130, "status": "within"}
+      },
+      "candidateB": {
+        "id": "nature-family",
+        "summary": "自然教育中心加一小时室内休息。",
+        "timeline": [
+          {"startTime": "14:00", "endTime": "16:00", "type": "activity", "name": "自然教育中心"},
+          {"startTime": "16:15", "endTime": "17:15", "type": "rest", "name": "亲子阅读区"}
+        ],
+        "budget": {"min": 160, "likely": 250, "max": 350, "perPerson": 125, "status": "within"}
+      },
+      "annotation": {"status": "seed", "label": "tie", "rubricVersion": "activity-preference-v2", "confidence": 0.78, "rationale": "两者均满足亲子节奏和休息要求。"}
+    },
+    {
+      "id": "pref-accessibility-tie",
+      "version": "1.0.0",
+      "tags": ["上海", "无障碍", "tie"],
+      "userRequest": "陪行动不便的长辈在上海玩半天，两个方案都确认有电梯和无障碍卫生间。",
+      "criteria": ["无障碍设施", "少步行", "有休息"],
+      "candidateA": {
+        "id": "accessible-museum",
+        "summary": "无障碍博物馆与馆内咖啡休息。",
+        "timeline": [
+          {"startTime": "13:30", "endTime": "15:30", "type": "activity", "name": "无障碍博物馆"},
+          {"startTime": "15:30", "endTime": "16:30", "type": "rest", "name": "馆内咖啡区"}
+        ],
+        "budget": {"min": 160, "likely": 220, "max": 300, "perPerson": 110, "status": "within"},
+        "warnings": ["轮椅需提前预约"]
+      },
+      "candidateB": {
+        "id": "accessible-aquarium",
+        "summary": "无障碍水族馆与馆内休息区。",
+        "timeline": [
+          {"startTime": "13:30", "endTime": "15:30", "type": "activity", "name": "无障碍水族馆"},
+          {"startTime": "15:30", "endTime": "16:30", "type": "rest", "name": "馆内休息区"}
+        ],
+        "budget": {"min": 180, "likely": 240, "max": 320, "perPerson": 120, "status": "within"},
+        "warnings": ["轮椅需提前预约"]
+      },
+      "annotation": {"status": "seed", "label": "tie", "rubricVersion": "activity-preference-v2", "confidence": 0.75, "rationale": "已知信息下无障碍能力、节奏和成本接近。"}
+    },
+    {
+      "id": "pref-transport-preference",
+      "version": "1.0.0",
+      "tags": ["深圳", "交通偏好", "personalization"],
+      "userRequest": "深圳周末约会，不开车，明确希望优先地铁，步行单段不要超过15分钟。",
+      "criteria": ["不驾车", "优先地铁", "单段步行不超过15分钟"],
+      "candidateA": {
+        "id": "taxi-heavy",
+        "summary": "主要使用网约车，末段步行25分钟。",
+        "timeline": [
+          {"startTime": "14:00", "endTime": "14:35", "type": "transit", "name": "网约车"},
+          {"startTime": "14:35", "endTime": "16:00", "type": "activity", "name": "艺术中心"},
+          {"startTime": "16:00", "endTime": "16:25", "type": "transit", "name": "步行25分钟"}
+        ],
+        "budget": {"min": 180, "likely": 260, "max": 380, "perPerson": 130, "status": "within"}
+      },
+      "candidateB": {
+        "id": "metro-first",
+        "summary": "地铁串联活动点，步行均在10分钟内。",
+        "timeline": [
+          {"startTime": "14:00", "endTime": "14:30", "type": "transit", "name": "地铁加步行8分钟"},
+          {"startTime": "14:30", "endTime": "16:00", "type": "activity", "name": "艺术中心"},
+          {"startTime": "16:00", "endTime": "16:20", "type": "transit", "name": "地铁加步行6分钟"}
+        ],
+        "budget": {"min": 60, "likely": 100, "max": 160, "perPerson": 50, "status": "within"}
+      },
+      "annotation": {"status": "seed", "label": "b", "rubricVersion": "activity-preference-v2", "confidence": 0.98, "rationale": "B完整遵守交通方式和步行限制。"}
+    }
+  ]
+}
