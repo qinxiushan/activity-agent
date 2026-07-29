@@ -37,6 +37,9 @@ jobs:
       - name: Unit + integration smoke
         run: npm run test:smoke
 
+      - name: Eval V1 deterministic contract
+        run: npm run test:eval:v1
+
   # ─────────────────────────────────────────────────────────────────────
   # Job 2: Real LLM E2E (slow, needs API key, main-only + manual)
   #
