@@ -32,6 +32,7 @@ export interface EvalStateSnapshot {
   pendingClarification?: {
     id: string;
     status: "pending" | "answered" | "expired";
+    questions?: Array<{ id: string; field: string }>;
   };
 }
 
@@ -49,6 +50,10 @@ export interface EvalOracle {
   requireBudgetInvariant?: boolean;
   requireWarningsPreserved?: boolean;
   requiredTools?: string[];
+  requiredToolGroups?: Array<{
+    id: string;
+    anyOf: string[];
+  }>;
   forbiddenTools?: string[];
   toolOrder?: EvalOrderRule[];
   maxToolCalls?: Partial<Record<string, number>>;

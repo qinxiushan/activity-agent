@@ -66,10 +66,16 @@ export class ScriptedUser {
       ? state.pendingClarification.id
       : undefined;
     if (!clarificationId) throw new Error("Cannot answer clarification: no pending clarification is present");
+    const answers = Object.fromEntries(
+      (state.pendingClarification?.questions ?? []).flatMap((question) => {
+        const value = action.answers[question.id] ?? action.answers[question.field];
+        return value === undefined ? [] : [[question.id, value]];
+      }),
+    );
     return {
       type: "clarification_response",
       clarificationId,
-      answers: action.answers,
+      answers: Object.keys(answers).length > 0 ? answers : action.answers,
     };
   }
 }
