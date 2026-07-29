@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-SOP-v2 has 23 tools. Final plan submission is token-only: `submit_plan` accepts a summary plus validation/budget tokens, then the server assembles canonical timeline, budget and validation-warning artifacts. Clarification defaults now fail closed unless every required question resolves. **356/356 smoke tests pass** and DeepSeek real-LLM E2E passes **61/61**, with exactly one `submit_plan` call.
+SOP-v2 has 23 tools. Final plan submission is token-only: `submit_plan` accepts a summary plus validation/budget tokens, then the server assembles canonical timeline, budget and validation-warning artifacts. Clarification defaults now fail closed unless every required question resolves. **356/356 smoke tests pass** and DeepSeek real-LLM E2E passes **61/61**, with exactly one `submit_plan` call. Eval V1 now adds a versioned 20-scenario Agent regression suite, deterministic hard graders, replayable data boundaries and a public-HTTP real-model runner.
 
 A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.agents/skills/phase-gated-agent/SKILL.md` (see "Reusable artifacts" below).
 
@@ -42,6 +42,8 @@ A reusable skill capturing the SOP-v2 design pattern has been extracted to `~/.a
 - `scripts/p0-smoke-test.ts` — **356/356 pass**, including data-quality provenance, clarification defaults, token-only canonical submission, warning persistence, artifact invalidation, retry limiting and legacy budget rendering compatibility. No API key needed.
 - `scripts/amap-provider-contract-test.ts` — **16/16 pass** against fixed official-response shapes without network access.
 - `scripts/v5-quality-eval.ts` + `evals/v5-service-scenarios.json` — **60/60 scenarios pass** across 3 cities × 4 party sizes × 5 budgets; evaluates itinerary validity, route availability, budget invariants, source disclosure and estimate explanation.
+- `scripts/eval-v1-contract-test.ts` + `evals/datasets/agent-regression-v1.json` — **37/37 contract assertions pass** over 20 scenarios covering complete plans, one-shot clarification, structured confirmation and historical regressions.
+- `scripts/eval-agent-v1.ts` — real Agent runner over public HTTP APIs. First DeepSeek V4 Flash sample passed **20/20**, completed in 81.551 seconds with 27 tool calls, and emitted a machine-readable report.
 - `npm run test:amap` — live acceptance passed with **42 REST calls at 100% success**, covering geocoding, weather, POI/detail, four route modes and distance matrix.
 - `tests/activity-visual.spec.ts` — Playwright visual regression (light + dark + sample prompt + 7 phase labels). Now also includes 4 new tests for the `User Preferences Panel` (empty state, refresh button POST, dark mode contrast, recent-intents toggle).
 - `scripts/e2e-real-llm-test.ts` — **61/61 pass** with sparse-input clarification, adaptive budget, canonical warning equality, exactly one token-only `submit_plan`, structured confirmation and ICS handoff.
@@ -93,6 +95,9 @@ Out of scope for the current milestone:
 | V5 evaluation dataset | `evals/v5-service-scenarios.json` |
 | Provider contract test | `scripts/amap-provider-contract-test.ts` |
 | Planning quality evaluation | `scripts/v5-quality-eval.ts` |
+| Eval V1 contracts and graders | `lib/eval/` |
+| Eval V1 Agent dataset | `evals/datasets/agent-regression-v1.json` |
+| Eval V1 real-model runner | `scripts/eval-agent-v1.ts` |
 | Playwright visual test | `tests/activity-visual.spec.ts` |
 | E2E test | `scripts/e2e-real-llm-test.ts` |
 | Project knowledge base | `AGENTS.md` |
@@ -129,11 +134,15 @@ node_modules/.bin/tsc --noEmit                # exit 0
 npm run test:smoke                            # 356/356 pass
 npm run test:provider                         # 16/16 pass, no API key
 npm run eval:quality                          # 60 scenarios, no API key
+npm run test:eval:v1                          # 37/37 pass, no API key
 npm run test:amap                             # requires AMAP_API_KEY
 
 # E2E (real LLM; includes clarification + full plan/confirm)
 # Requires: dev server running + auth.json with API key + settings.json with default model
 npm run e2e
+
+# Eval V1 real Agent dataset runner (server must already be running)
+npm run eval:agent:v1 -- --limit 1 --output /tmp/eval-v1-report.json
 ```
 
 ## Progress judgment
@@ -146,15 +155,15 @@ npm run e2e
 
 | # | Task | Value | Effort | Why |
 |---|---|---|---|---|
-| 1 | **Build a human-labelled recommendation golden set** | High | Medium | Current 60-scenario set measures engineering correctness, not subjective relevance or personalization quality. |
+| 1 | **Build Eval V2 human preference layer** | High | Medium | V1 hard gates prove workflow correctness, but do not yet measure whether users prefer one valid recommendation over another. |
 | 2 | **Integrate trusted ticket and dining price providers** | High | High | AMap does not provide complete real-time ticket/menu prices; current adaptive estimates remain explicitly uncertain. |
 | 3 | **Persist evaluation reports and trends in CI** | High | Medium | Detect quality, latency and cost regressions by commit/model instead of reading one-off console output. |
 | 4 | **Wire `/activity` into the main nav** | Medium | Low | Improve discoverability without changing the planning protocol. |
 | 5 | **Multi-day trip support** | Medium | High | Requires itinerary, budget and state-machine contract extensions. |
 
-**Recommendation:** build the human-labelled golden set next. V5 now proves that the
-pipeline is structurally correct and externally sourced; it does not yet prove that
-users consistently prefer one recommendation over another.
+**Recommendation:** build Eval V2 next: create a human-labelled pairwise preference
+set, calibrate an LLM judge against it, and keep those subjective scores diagnostic
+until judge/human agreement is demonstrated.
 
 ## Re-opening the work
 
@@ -170,6 +179,7 @@ node_modules/.bin/tsc --noEmit
 npm run test:smoke              # 356/356
 npm run test:provider           # 16/16
 npm run eval:quality            # 60 scenarios
+npm run test:eval:v1            # 37/37
 
 # Restart dev server if needed
 pkill -f "next dev" 2>/dev/null

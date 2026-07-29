@@ -18,6 +18,8 @@ docker compose up -d --build # app + postgres + redis + prometheus + grafana
 | ------------------------------------------------- | ---------------------------------- |
 | Typecheck                                         | `node_modules/.bin/tsc --noEmit` |
 | Unit + integration smoke (no API key)             | `npm run test:smoke`             |
+| Eval V1 contract (no API key)                     | `npm run test:eval:v1`           |
+| Eval V1 real Agent (server must be running)       | `npm run eval:agent:v1`          |
 | Real LLM e2e — one-shot (auto-starts dev server) | `npm run e2e`                    |
 | Real LLM e2e — manual (server must be running)   | `npm run e2e:real`               |
 | Required-auth e2e                                | `npm run e2e:auth`               |
@@ -70,7 +72,7 @@ Three jobs:
 
 | Job            | Triggers                          | Needs secrets          | What it runs                              | Timeout |
 | -------------- | --------------------------------- | ---------------------- | ----------------------------------------- | ------- |
-| **lint** | every push + PR                   | ❌                     | `tsc --noEmit` + `npm run test:smoke` | 5 min   |
+| **lint** | every push + PR                   | ❌                     | `tsc --noEmit` + smoke + Eval V1 contract | 5 min   |
 | **auth-e2e** | every push + PR                | ❌                     | required-auth Playwright (`npm run e2e:auth`) | 10 min |
 | **e2e**  | push to`main` + manual dispatch | ✅`DEEPSEEK_API_KEY` | full LLM e2e（PG + Redis services, `AUTH_MODE=optional`） | 10 min  |
 
@@ -260,10 +262,19 @@ components/
 hooks/
   useActivitySession.ts    Minimal SSE + plan-state polling hook (separate from useAgentSession)
 
+lib/eval/
+  types.ts                 Versioned scenario/run/trace/grade contracts
+  harness.ts               Scripted-user orchestration and deterministic grading
+  replay-data-provider.ts  Ordered external-data replay with explicit fallback
+  http-agent-driver.ts     Public-HTTP real Agent driver; no hidden CoT access
+  graders/                 Outcome, constraint and trajectory hard graders
+
 scripts/
   p0-smoke-test.ts         Unit + integration tests (356 assertions, no API)
   amap-provider-contract-test.ts  Offline AMap response/parser contract (16 assertions)
   v5-quality-eval.ts       Deterministic 60-scenario planning quality evaluation
+  eval-v1-contract-test.ts Eval V1 dataset/replay/grader contract (37 assertions)
+  eval-agent-v1.ts         Real Agent dataset runner + JSON metrics report
   e2e-real-llm-test.ts     Real LLM end-to-end test (requires API key)
                            + optional-mode X-User-Id → plan_states.user_id 断言
   e2e-auth-test.ts         Required-auth wrapper: auto-start server + run Playwright auth suite
@@ -274,6 +285,8 @@ docker/
 
 Repo root:
   evals/v5-service-scenarios.json  Auditable V5 scenario axes and quality gates
+  evals/datasets/agent-regression-v1.json  20 versioned Agent regression scenarios
+  evals/fixtures/mock-v1.json      Replay fixture/fallback policy
   Dockerfile               multi-stage standalone build for app container
   docker-compose.yml       full stack: app + postgres + redis
   docker-compose.dev.yml   infra-only dev stack (postgres + redis)
@@ -355,6 +368,21 @@ npm run test:provider
 npm run eval:quality
 # Expected: 60 scenarios, all declared quality gates pass
 ```
+
+### Eval V1 Agent regression
+
+```bash
+npm run test:eval:v1
+# Expected: 37/37 pass; runs in CI without an API key
+
+# Requires a configured model and a running dev server
+npm run eval:agent:v1 -- --repetitions 1
+# Optional filters: --limit N, --id <scenario-id>, --output <report.json>
+```
+
+Eval V1 scores only observable messages, tool calls/results and persisted plan state;
+it never reads hidden chain-of-thought. The real runner reports hard success rate,
+pass@k, latency, tool-call count and failure-code distribution.
 
 ### Real AMap acceptance (requires AMAP_API_KEY)
 
