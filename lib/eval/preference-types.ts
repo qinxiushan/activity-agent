@@ -132,5 +132,17 @@ export interface PreferenceReviewPacket {
     confidence?: number;
     rationale?: string;
   }>;
-  manifest: PreferenceReviewRecord[];
+  /** @deprecated Keep the mapping in a separate manifest so reviewers remain blind. */
+  manifest?: PreferenceReviewRecord[];
+}
+
+export interface PreferenceReviewManifest {
+  schemaVersion: "preference-review-manifest-v2";
+  packetId: string;
+  records: PreferenceReviewRecord[];
+}
+
+export interface PreferenceReviewBundle {
+  packet: PreferenceReviewPacket;
+  manifest: PreferenceReviewManifest;
 }
