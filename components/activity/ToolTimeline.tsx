@@ -106,11 +106,13 @@ export function ToolTimeline({ toolCalls }: { toolCalls: ActivityToolCall[] }) {
           const formatted = elapsed === null
             ? "running…"
             : elapsed >= 1000
-              ? `${(elapsed / 1000).toFixed(1)}s`
-              : `${elapsed}ms`;
+              ? `${(elapsed / 1000).toFixed(3)}s`
+              : `${Math.round(elapsed)}ms`;
           const dur = tc.timingSource === "batch_upper_bound" && elapsed !== null
             ? `批次≤${formatted}`
-            : formatted;
+            : tc.timingSource === "exact" && elapsed !== null
+              ? `精确 ${formatted}`
+              : formatted;
           return (
             <div key={tc.id} style={{
               display: "flex", alignItems: "flex-start", gap: 10,

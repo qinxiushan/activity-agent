@@ -1416,7 +1416,7 @@ async function main() {
   log("extractTextFromContent joins text blocks", extracted === "hello\nworld");
 
   section("🕘 Activity Panel: historical tool-call restore");
-  const { restoreActivityToolCallsFromMessages } = await import("../lib/activity-tool-history");
+  const { applyExactToolSpans, restoreActivityToolCallsFromMessages } = await import("../lib/activity-tool-history");
   const restoredToolCalls = restoreActivityToolCallsFromMessages([
     {
       role: "assistant",
@@ -1466,6 +1466,21 @@ async function main() {
   log("historical restore: sets endedAt from toolResult timestamp", restoredToolCalls[0]?.endedAt === 1200);
   log("historical restore: preserves booking result payload", (restoredToolCalls[0]?.result as { orderId?: string })?.orderId === "ord_123");
   log("historical restore: marks successful toolResult as ok", restoredToolCalls[0]?.ok === true);
+  const exactRestoredToolCalls = applyExactToolSpans(restoredToolCalls, [{
+    schemaVersion: 1,
+    sessionId: "history-session",
+    toolCallId: "call_reserve",
+    toolName: "reservation_exec",
+    startedAt: "2026-08-04T10:00:00.000Z",
+    endedAt: "2026-08-04T10:00:03.456Z",
+    durationMs: 3_456.125,
+    status: "success",
+    isError: false,
+    fallbackUsed: false,
+    orphanEnd: false,
+  }]);
+  log("historical restore: exact ToolSpan replaces batch timing", exactRestoredToolCalls[0]?.timingSource === "exact");
+  log("historical restore: exact ToolSpan preserves millisecond duration", (exactRestoredToolCalls[0]?.endedAt ?? 0) - exactRestoredToolCalls[0]!.startedAt === 3_456.125);
 
   section("🛡️ Stage-2 T6: Security Guard");
   const { validateUserInput, MAX_INPUT_CHARS } = await import("../lib/input-guard");

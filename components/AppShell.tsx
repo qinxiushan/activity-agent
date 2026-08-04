@@ -736,6 +736,7 @@ export function AppShell({
               onSystemPromptChange={handleSystemPromptChange}
               onSessionStatsChange={handleSessionStatsChange}
               onContextUsageChange={handleContextUsageChange}
+              activityToolCalls={activity.toolCalls}
             />
           ) : showPlaceholder ? (
             activeCwd ? (

@@ -1,4 +1,5 @@
 import type { AgentMessage, AssistantMessage, ToolResultMessage, ToolCallContent, TextContent } from "./types";
+import type { ToolExecutionSpan } from "./tool-telemetry";
 
 export interface HistoricalActivityToolCall {
   id: string;
@@ -9,7 +10,7 @@ export interface HistoricalActivityToolCall {
   ok: boolean;
   startedAt: number;
   endedAt: number | null;
-  timingSource: "batch_upper_bound";
+  timingSource: "exact" | "batch_upper_bound";
 }
 
 function summarize(value: unknown, max = 80): string {
@@ -105,4 +106,25 @@ export function restoreActivityToolCallsFromMessages(messages: AgentMessage[]): 
   }
 
   return restored;
+}
+
+export function applyExactToolSpans<T extends HistoricalActivityToolCall>(
+  toolCalls: T[],
+  spans: ToolExecutionSpan[],
+): T[] {
+  const byId = new Map(spans.map((span) => [span.toolCallId, span]));
+  return toolCalls.map((toolCall) => {
+    const span = byId.get(toolCall.id);
+    if (!span) return toolCall;
+    const startedAt = Date.parse(span.startedAt);
+    if (!Number.isFinite(startedAt)) return toolCall;
+    return {
+      ...toolCall,
+      name: span.toolName || toolCall.name,
+      ok: !span.isError,
+      startedAt,
+      endedAt: startedAt + Math.max(0, span.durationMs),
+      timingSource: "exact",
+    } as T;
+  });
 }

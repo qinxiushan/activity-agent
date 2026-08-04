@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { StandardEvent } from "@/lib/event-types";
 import { AgentApiError, extractApiError } from "@/lib/agent-client";
-import { restoreActivityToolCallsFromMessages } from "@/lib/activity-tool-history";
+import { applyExactToolSpans, restoreActivityToolCallsFromMessages } from "@/lib/activity-tool-history";
 import type { AgentMessage } from "@/lib/types";
 import type { PendingClarification } from "@/lib/clarification";
+import type { ToolExecutionSpan } from "@/lib/tool-telemetry";
 
 export interface ActivityToolCall {
   id: string;
@@ -85,6 +86,10 @@ interface SessionContextResponse {
   context?: {
     messages?: AgentMessage[];
   };
+}
+
+interface ToolSpansResponse {
+  spans?: ToolExecutionSpan[];
 }
 
 export interface ActivityState {
@@ -489,14 +494,18 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
       toolCalls: cached.length > 0 ? cached : prev.toolCalls,
     }));
     if (cached.length === 0) {
-      void fetch(`${serverBase}/api/sessions/${encodeURIComponent(sid)}`, { cache: "no-store" })
-        .then(async (res) => {
-          if (!res.ok) return null;
-          return await res.json() as SessionContextResponse;
-        })
-        .then((body) => {
+      const sessionUrl = `${serverBase}/api/sessions/${encodeURIComponent(sid)}`;
+      const spansUrl = `${sessionUrl}/tool-spans`;
+      void Promise.all([
+        fetch(sessionUrl, { cache: "no-store" }).then(async (res) => res.ok ? await res.json() as SessionContextResponse : null),
+        fetch(spansUrl, { cache: "no-store" })
+          .then(async (res) => res.ok ? await res.json() as ToolSpansResponse : null)
+          .catch(() => null),
+      ])
+        .then(([body, spanBody]) => {
           if (!body?.context?.messages || sessionIdRef.current !== sid) return;
-          const restored = restoreActivityToolCallsFromMessages(body.context.messages);
+          const historical = restoreActivityToolCallsFromMessages(body.context.messages);
+          const restored = applyExactToolSpans(historical, spanBody?.spans ?? []);
           toolCallsBySession.current.set(sid, restored);
           setState((prev) => {
             if (sessionIdRef.current !== sid) return prev;

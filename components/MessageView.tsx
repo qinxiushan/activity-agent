@@ -32,6 +32,7 @@ interface Props {
   onEditContent?: (content: string) => void;
   showTimestamp?: boolean;
   prevTimestamp?: number;
+  exactToolDurationsMs?: ReadonlyMap<string, number>;
 }
 
 function formatTime(ts?: number): string | null {
@@ -66,12 +67,17 @@ function copyText(text: string): Promise<void> {
   }
 }
 
-export function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp }: Props) {
+function formatToolDuration(durationMs: number): string {
+  if (durationMs < 1_000) return `${Math.round(durationMs)}ms`;
+  return `${(durationMs / 1_000).toFixed(3)}s`;
+}
+
+export function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, exactToolDurationsMs }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} exactToolDurationsMs={exactToolDurationsMs} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -286,6 +292,7 @@ function AssistantMessageView({
   modelNames,
   showTimestamp,
   prevTimestamp,
+  exactToolDurationsMs,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -293,6 +300,7 @@ function AssistantMessageView({
   modelNames?: Record<string, string>;
   showTimestamp?: boolean;
   prevTimestamp?: number;
+  exactToolDurationsMs?: ReadonlyMap<string, number>;
 }) {
   const time = showTimestamp ? formatTime(message.timestamp) : null;
   const blocks = message.content ?? [];
@@ -318,17 +326,20 @@ function AssistantMessageView({
   // Session files do not persist an exact per-tool start timestamp. This delta
   // includes model generation and the slowest parallel tool in the batch, so it
   // is only an upper bound for an individual tool's execution time.
-  const toolCallDurations = useMemo<Map<string, number>>(() => {
-    const map = new Map<string, number>();
+  const toolCallDurations = useMemo<Map<string, { durationMs: number; source: "exact" | "batch_upper_bound" }>>(() => {
+    const map = new Map<string, { durationMs: number; source: "exact" | "batch_upper_bound" }>();
+    for (const [callId, durationMs] of exactToolDurationsMs ?? []) {
+      map.set(callId, { durationMs, source: "exact" });
+    }
     if (!toolResults || !message.timestamp) return map;
     for (const [callId, result] of toolResults) {
-      if (result.timestamp && message.timestamp) {
-        const secs = Math.round((result.timestamp - message.timestamp) / 1000);
-        if (secs > 0) map.set(callId, secs);
+      if (!map.has(callId) && result.timestamp && message.timestamp) {
+        const durationMs = result.timestamp - message.timestamp;
+        if (durationMs > 0) map.set(callId, { durationMs, source: "batch_upper_bound" });
       }
     }
     return map;
-  }, [toolResults, message.timestamp]);
+  }, [toolResults, message.timestamp, exactToolDurationsMs]);
 
   const textContent = blocks
     .filter((b): b is TextContent => b.type === "text")
@@ -505,7 +516,7 @@ function AssistantMessageView({
   );
 }
 
-function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number> }) {
+function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, { durationMs: number; source: "exact" | "batch_upper_bound" }> }) {
   if (block.type === "text") {
     return <TextBlock block={block as TextContent} />;
   }
@@ -613,7 +624,7 @@ function ThinkingBlock({ block, duration }: { block: ThinkingContent; duration?:
 }
 
 
-function ToolCallBlock({ block, result, isRunning, duration }: { block: ToolCallContent; result?: ToolResultMessage; isRunning?: boolean; duration?: number }) {
+function ToolCallBlock({ block, result, isRunning, duration }: { block: ToolCallContent; result?: ToolResultMessage; isRunning?: boolean; duration?: { durationMs: number; source: "exact" | "batch_upper_bound" } }) {
   const [expanded, setExpanded] = useState(false);
   const inputStr = JSON.stringify(block.input, null, 2);
 
@@ -659,7 +670,12 @@ function ToolCallBlock({ block, result, isRunning, duration }: { block: ToolCall
           {getToolPreview(block)}
         </span>
         {duration !== undefined && (
-          <span title="模型生成 + 并行工具批次的耗时上界，不是该工具的精确执行时间" style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>批次≤{duration}s</span>
+          <span
+            title={duration.source === "exact" ? "pi SDK 工具执行开始到结束的精确耗时" : "模型生成 + 并行工具批次的耗时上界，不是该工具的精确执行时间"}
+            style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
+          >
+            {duration.source === "exact" ? "精确 " : "批次≤"}{formatToolDuration(duration.durationMs)}
+          </span>
         )}
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
           <polyline points="2 3.5 5 6.5 8 3.5" />
@@ -838,4 +854,3 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
     </div>
   );
 }
-
