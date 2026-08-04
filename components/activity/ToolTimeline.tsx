@@ -102,7 +102,15 @@ export function ToolTimeline({ toolCalls }: { toolCalls: ActivityToolCall[] }) {
         {toolCalls.map((tc, i) => {
           const icon = TOOL_ICONS[tc.name] ?? "•";
           const color = TOOL_COLORS[tc.name] ?? "var(--text-dim)";
-          const dur = tc.endedAt ? `${tc.endedAt - tc.startedAt}ms` : "running…";
+          const elapsed = tc.endedAt ? tc.endedAt - tc.startedAt : null;
+          const formatted = elapsed === null
+            ? "running…"
+            : elapsed >= 1000
+              ? `${(elapsed / 1000).toFixed(1)}s`
+              : `${elapsed}ms`;
+          const dur = tc.timingSource === "batch_upper_bound" && elapsed !== null
+            ? `批次≤${formatted}`
+            : formatted;
           return (
             <div key={tc.id} style={{
               display: "flex", alignItems: "flex-start", gap: 10,

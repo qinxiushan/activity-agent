@@ -9,6 +9,7 @@ export interface HistoricalActivityToolCall {
   ok: boolean;
   startedAt: number;
   endedAt: number | null;
+  timingSource: "batch_upper_bound";
 }
 
 function summarize(value: unknown, max = 80): string {
@@ -63,6 +64,7 @@ export function restoreActivityToolCallsFromMessages(messages: AgentMessage[]): 
           ok: true,
           startedAt,
           endedAt: null,
+          timingSource: "batch_upper_bound",
         };
         byId.set(next.id, restored.length);
         restored.push(next);
@@ -85,6 +87,7 @@ export function restoreActivityToolCallsFromMessages(messages: AgentMessage[]): 
         ok: toolResult.isError !== true,
         startedAt: endedAt,
         endedAt,
+        timingSource: "batch_upper_bound",
       };
       byId.set(synthetic.id, restored.length);
       restored.push(synthetic);

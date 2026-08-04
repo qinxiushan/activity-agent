@@ -16,6 +16,7 @@ export interface ActivityToolCall {
   ok: boolean;
   startedAt: number;
   endedAt: number | null;
+  timingSource?: "exact" | "batch_upper_bound";
 }
 
 export interface ActivityPlanState {
@@ -277,6 +278,7 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
               ok: true,
               startedAt: Date.now(),
               endedAt: null,
+              timingSource: "exact",
             };
             setState((prev) => ({ ...prev, toolCalls: [...prev.toolCalls, tc] }));
             break;
@@ -284,10 +286,20 @@ export function useActivitySession(serverBase = ""): UseActivitySessionResult {
           case "tool_end": {
             const id = ev.toolCallId ?? "";
             const result = (ev as { result?: unknown }).result;
+            const durationMs = (ev as { durationMs?: number }).durationMs;
             setState((prev) => ({
               ...prev,
               toolCalls: prev.toolCalls.map((t) => t.id === id
-                ? { ...t, ok: !ev.isError, endedAt: Date.now(), result: result ?? t.result, resultSummary: result ? summarizeResult(result) : t.resultSummary }
+                ? {
+                    ...t,
+                    ok: !ev.isError,
+                    endedAt: typeof durationMs === "number"
+                      ? t.startedAt + Math.max(0, durationMs)
+                      : Date.now(),
+                    timingSource: typeof durationMs === "number" ? "exact" : t.timingSource,
+                    result: result ?? t.result,
+                    resultSummary: result ? summarizeResult(result) : t.resultSummary,
+                  }
                 : t),
             }));
             break;

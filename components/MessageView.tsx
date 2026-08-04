@@ -315,9 +315,9 @@ function AssistantMessageView({
     return secs > 0 ? secs : undefined;
   }, [message.timestamp, prevTimestamp]);
 
-  // Tool call durations derived from session file timestamps (accurate for completed messages)
-  // assistant message timestamp = when generation ended = when tools started running
-  // toolResult timestamp = when tool execution finished
+  // Session files do not persist an exact per-tool start timestamp. This delta
+  // includes model generation and the slowest parallel tool in the batch, so it
+  // is only an upper bound for an individual tool's execution time.
   const toolCallDurations = useMemo<Map<string, number>>(() => {
     const map = new Map<string, number>();
     if (!toolResults || !message.timestamp) return map;
@@ -659,7 +659,7 @@ function ToolCallBlock({ block, result, isRunning, duration }: { block: ToolCall
           {getToolPreview(block)}
         </span>
         {duration !== undefined && (
-          <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
+          <span title="模型生成 + 并行工具批次的耗时上界，不是该工具的精确执行时间" style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>批次≤{duration}s</span>
         )}
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
           <polyline points="2 3.5 5 6.5 8 3.5" />
@@ -747,6 +747,9 @@ function getToolPreview(block: ToolCallContent): string {
   if ("query" in input) return String(input.query).slice(0, 120);
 
   const first = input[keys[0]];
+  if (first && typeof first === "object") {
+    try { return JSON.stringify(first).slice(0, 120); } catch { return ""; }
+  }
   return String(first).slice(0, 120);
 }
 
@@ -835,5 +838,4 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
     </div>
   );
 }
-
 
