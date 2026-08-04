@@ -49,6 +49,8 @@ assert(reduce(mkState("clarifying"), { type: "USER_TURN_CLASSIFIED", intent: "an
 
 assert(reduce(mkState("idle"), { type: "USER_TURN_CLASSIFIED", intent: "new_request" }).phase === "intent_capture",
   "idle 新请求 → intent_capture");
+assert(reduce(mkState("idle"), { type: "USER_TURN_CLASSIFIED", intent: "smalltalk" }).phase === "idle",
+  "idle 问候/闲聊 → 保持 idle");
 
 const confirmOk: PlanEvent = { type: "USER_TURN_CLASSIFIED", intent: "confirm", planHash: H };
 assert(reduce(mkState("plan_confirm", samplePlan), confirmOk).phase === "executing",

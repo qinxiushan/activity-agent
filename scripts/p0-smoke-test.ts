@@ -27,7 +27,7 @@ import {
 import { wrapToolWithResilience, getRecentMetrics, clearMetrics, recordToolMetric } from "../lib/tool-wrapper";
 import { getWeather } from "../lib/weather-service";
 import { computeRoute, buildRouteChain, haversineMeters } from "../lib/route-service";
-import { BudgetService } from "../lib/budget-service";
+import { BudgetService, type BudgetBreakdown } from "../lib/budget-service";
 import { hasAdaptivePriceRange, inferCostPriorKey } from "../lib/cost-resolver";
 import { MockDataProvider } from "../lib/mock-data-provider";
 import { assessDataQuality, attachFallbackQuality } from "../lib/data-quality";
@@ -446,13 +446,17 @@ async function main() {
   const mgr = new PlanStateManager("smoke-session-v2");
 
   log("Initial phase idle", mgr.currentPhase === "idle");
+  log("classify_turn allowed in idle activation gate", isToolAllowedInPhase("classify_turn", "idle"));
+  log("intent_parse BLOCKED in idle", !isToolAllowedInPhase("intent_parse", "idle"));
+  log("ask_clarification BLOCKED in idle", !isToolAllowedInPhase("ask_clarification", "idle"));
   log("intent_parse allowed in intent_capture", isToolAllowedInPhase("intent_parse", "intent_capture"));
   log("intent_parse allowed in clarifying", isToolAllowedInPhase("intent_parse", "clarifying"));
   log("intent_parse allowed in planning (for plan submit)", isToolAllowedInPhase("intent_parse", "planning"));
   log("ask_clarification allowed in intent_capture", isToolAllowedInPhase("ask_clarification", "intent_capture"));
   log("submit_plan allowed in planning", isToolAllowedInPhase("submit_plan", "planning"));
   log("submit_plan BLOCKED before planning", !isToolAllowedInPhase("submit_plan", "intent_capture"));
-  log("submit_plan BLOCKED after submission", !isToolAllowedInPhase("submit_plan", "plan_confirm"));
+  log("submit_plan admitted in plan_confirm for idempotent replay",
+    isToolAllowedInPhase("submit_plan", "plan_confirm"));
   log("ask_clarification BLOCKED in clarifying (1-次硬限)", !isToolAllowedInPhase("ask_clarification", "clarifying"));
   log("ask_clarification BLOCKED in planning", !isToolAllowedInPhase("ask_clarification", "planning"));
   log("get_weather allowed in planning", isToolAllowedInPhase("get_weather", "planning"));
@@ -514,6 +518,15 @@ async function main() {
     budgetPerPerson: 300,
   });
   log("All critical present → empty missing", missing2.length === 0);
+  const invalidCritical = getMissingCriticalFields({
+    date: "2026-02-30",
+    startTime: "25:00",
+    partySize: 0,
+    departurePoint: { name: " ", city: "北京" },
+    budgetPerPerson: -1,
+  });
+  log("Malformed critical values remain missing",
+    invalidCritical.length === 5, invalidCritical.join(", "));
 
   // 分类
   log("Classify '确认'", classifyUserConfirmation("确认") === "confirm");
@@ -615,6 +628,15 @@ async function main() {
 
   log("All tools have name + label", tools.every((t) => t.name && t.label));
   log("All tools have execute fn", tools.every((t) => typeof t.execute === "function"));
+  const sequentialToolNames = new Set([
+    "classify_turn", "intent_parse", "submit_plan", "ask_clarification",
+    "validate_itinerary", "calculate_budget", "commit_itinerary", "plan_save",
+  ]);
+  log("State-mutating tools explicitly execute sequentially",
+    tools.filter((tool) => sequentialToolNames.has(tool.name)).every((tool) => tool.executionMode === "sequential"));
+  log("Read-only route queries explicitly execute in parallel",
+    tools.filter((tool) => ["compare_route_options", "distance_matrix"].includes(tool.name))
+      .every((tool) => tool.executionMode === "parallel"));
 
   const regionTool = tools.find((t) => t.name === "detect_user_region");
   if (regionTool) {
@@ -741,7 +763,33 @@ async function main() {
     log("Clarification replay is rejected", replayResult.ok === false);
     const r5 = await withPlanState(mgrAsk, () => askTool.execute!("id", { missingFields: ["date"], question: "What date?" }, undefined, undefined, {} as never));
     const blockedCode = (r5.details as { code?: string })?.code;
-    log("2nd ask_clarification BLOCKED (PHASE_GUARD or MAX)", blockedCode === "PHASE_GUARD" || blockedCode === "MAX_CLARIFICATIONS_EXCEEDED", blockedCode ?? "");
+    log("2nd ask_clarification BLOCKED (phase/max/no missing)",
+      blockedCode === "PHASE_GUARD" ||
+      blockedCode === "MAX_CLARIFICATIONS_EXCEEDED" ||
+      blockedCode === "NO_MISSING_CRITICAL_FIELDS",
+      blockedCode ?? "");
+
+    const mgrNormalizedAsk = new PlanStateManager("smoke-ask-normalized");
+    await mgrNormalizedAsk.transition("intent_capture", "explicit planning request");
+    mgrNormalizedAsk.recordIntent({
+      startTime: "10:00",
+      departurePoint: { name: "三里屯", city: "北京" },
+      partySize: 2,
+      budgetPerPerson: 300,
+    });
+    const normalizedAsk = await withPlanState(mgrNormalizedAsk, () => askTool.execute!("id", {
+      title: "告诉我你的活动需求",
+      questions: [
+        { id: "date", field: "date", type: "date", title: "活动日期", required: true },
+        { id: "group", field: "groupType", type: "text", title: "人群类型", required: false },
+        { id: "mood", field: "mood", type: "text", title: "活动氛围", required: false },
+      ],
+    }, undefined, undefined, {} as never));
+    log("ask_clarification derives missingFields when model omits it",
+      (normalizedAsk.details as { asked?: boolean })?.asked === true);
+    log("ask_clarification filters optional/non-missing questions",
+      mgrNormalizedAsk.pendingClarification?.questions.length === 1 &&
+      mgrNormalizedAsk.pendingClarification.questions[0]?.field === "date");
   }
 
   // 验证 intent_parse 的 plan submit
@@ -752,6 +800,35 @@ async function main() {
   const budgetTool = tools.find((t) => t.name === "calculate_budget");
   const submitTool = tools.find((t) => t.name === "submit_plan");
   if (ipTool && compareTool && matrixTool && validateTool && budgetTool && submitTool) {
+    const mgrIntent = new PlanStateManager("smoke-intent-fields");
+    await mgrIntent.transition("intent_capture", "start");
+    await withPlanState(mgrIntent, () => ipTool.execute!("id", {
+      date: "2026-08-01",
+      startTime: "10:00",
+      departurePoint: { name: "三里屯", city: "北京" },
+      partySize: 2,
+      budgetPerPerson: 300,
+      endPolicy: "specified",
+      endPoint: { name: "国贸", city: "北京" },
+      transportPreferences: ["transit", "walking"],
+    }, undefined, undefined, {} as never));
+    log("intent_parse persists end policy, endpoint and transport preferences",
+      mgrIntent.intent.endPolicy === "specified" &&
+      mgrIntent.intent.endPoint?.name === "国贸" &&
+      mgrIntent.intent.transportPreferences?.join(",") === "transit,walking");
+
+    const mgrDefaultEnd = new PlanStateManager("smoke-intent-default-end");
+    await mgrDefaultEnd.transition("intent_capture", "start");
+    await withPlanState(mgrDefaultEnd, () => ipTool.execute!("id", {
+      date: "2026-08-01",
+      startTime: "10:00",
+      departurePoint: { name: "三里屯", city: "北京" },
+      partySize: 2,
+      budgetPerPerson: 300,
+    }, undefined, undefined, {} as never));
+    log("intent_parse materializes last_poi when no endpoint is specified",
+      mgrDefaultEnd.intent.endPolicy === "last_poi");
+
     const mgr4 = new PlanStateManager("smoke-submit");
     await mgr4.transition("intent_capture", "start");
     await mgr4.transition("planning", "all fields ok");
@@ -829,20 +906,21 @@ async function main() {
     }, undefined, undefined, {} as never));
     const budgetDetails = budget.details as {
       budgetToken?: string;
-      breakdown?: {
-        knownTotal: number;
-        estimatedTotal: number;
-        reserveTotal: number;
-        projectedTotal: number;
-        projectedPerPerson: number;
-        status: string;
-        items: unknown[];
-      };
+      breakdown?: BudgetBreakdown;
     };
     log("V4 known activity price multiplies by party size", budgetDetails.breakdown?.knownTotal === 60);
     log("V4 budget reports total and per-person consistently",
       budgetDetails.breakdown?.projectedTotal === 60 && budgetDetails.breakdown?.projectedPerPerson === 30);
     log("V4 budget status is within limit", budgetDetails.breakdown?.status === "within");
+    if (budgetDetails.breakdown && budgetDetails.budgetToken) {
+      await mgr4.recordBudgetCalculation("alternate-strategy-token", budgetDetails.breakdown);
+      const originalArtifacts = mgr4.resolvePlanningArtifacts(
+        validationDetails.validationToken ?? "",
+        budgetDetails.budgetToken,
+      );
+      log("Earlier budget token remains resolvable after comparing another strategy",
+        originalArtifacts.ok);
+    }
     const badSubmit = await withPlanState(mgr4, () => submitTool.execute!("id", {
       summary: "颐和园",
       validationToken: validationDetails.validationToken,
@@ -856,6 +934,7 @@ async function main() {
       summary: "颐和园",
       validationToken: validationDetails.validationToken,
       budgetToken: budgetDetails.budgetToken,
+      idempotencyKey: "smoke-plan-001",
     }, undefined, undefined, {} as never));
     const submittedDetails = r6.details as {
       planSubmitted?: boolean;
@@ -877,6 +956,25 @@ async function main() {
     log("submit_plan preserves validation warnings server-side",
       submittedDetails.plan?.warnings?.[0]?.code === "OPENING_HOURS_UNKNOWN");
     log("Phase transitioned to plan_confirm", mgr4.currentPhase === "plan_confirm");
+    const historyLengthAfterSubmit = mgr4.current.history.length;
+    const replay = await withPlanState(mgr4, () => submitTool.execute!("id", {
+      summary: "颐和园",
+      validationToken: validationDetails.validationToken,
+      budgetToken: budgetDetails.budgetToken,
+      idempotencyKey: "smoke-plan-001",
+    }, undefined, undefined, {} as never));
+    log("submit_plan replays the successful result for the same idempotency key",
+      (replay.details as { idempotentReplay?: boolean })?.idempotentReplay === true);
+    log("idempotent replay does not add another phase transition",
+      mgr4.current.history.length === historyLengthAfterSubmit);
+    const conflict = await withPlanState(mgr4, () => submitTool.execute!("id", {
+      summary: "不同方案",
+      validationToken: validationDetails.validationToken,
+      budgetToken: budgetDetails.budgetToken,
+      idempotencyKey: "smoke-plan-001",
+    }, undefined, undefined, {} as never));
+    log("reusing an idempotency key for another request is rejected",
+      (conflict.details as { code?: string })?.code === "IDEMPOTENCY_KEY_CONFLICT");
     await mgr4.dispatch({ type: "USER_TURN_CLASSIFIED", intent: "modify" });
     const staleAfterModify = mgr4.resolvePlanningArtifacts(
       validationDetails.validationToken ?? "",

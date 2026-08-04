@@ -21,6 +21,7 @@
  * 并通过 tool-wrapper 提供 retry + fallback。
  */
 
+import { createHash } from "node:crypto";
 import { Type, type Static } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
@@ -31,6 +32,7 @@ import {
   dataQueryWrapOpts,
   writeOpWrapOpts,
   persistWrapOpts,
+  recordToolMetric,
 } from "../../lib/tool-wrapper";
 import {
   MAX_CLARIFICATIONS,
@@ -92,6 +94,7 @@ const intentRecordSchema = Type.Object({
   submitPlan: Type.Optional(Type.Boolean({ description: "旧版兼容字段；新流程禁止使用，请调用 submit_plan" })),
   plan: Type.Optional(Type.Object({
     summary: Type.String({ description: "方案摘要" }),
+    idempotencyKey: Type.Optional(Type.String({ description: "旧版兼容提交的幂等键" })),
     validationToken: Type.Optional(Type.String({ description: "validate_itinerary 返回的 validationToken；V3 提交必填" })),
     budgetToken: Type.Optional(Type.String({ description: "calculate_budget 返回的 budgetToken；V4 提交必填" })),
     timeline: Type.Array(Type.Object({
@@ -202,10 +205,18 @@ const submitPlanSchema = Type.Object({
     minLength: 1,
     description: "calculate_budget 返回的 budgetToken",
   }),
+  idempotencyKey: Type.Optional(Type.String({
+    minLength: 8,
+    maxLength: 128,
+    description: "逻辑提交的稳定幂等键；同一方案重试必须复用。省略时服务端根据摘要和两个 token 确定性生成",
+  })),
 });
 
 const askClarificationSchema = Type.Object({
-  missingFields: Type.Array(Type.String(), { description: "缺失的关键字段名" }),
+  missingFields: Type.Optional(Type.Array(Type.String(), {
+    maxItems: 5,
+    description: "兼容字段，可省略；服务端会以当前 intent 实际缺失的关键字段为准",
+  })),
   title: Type.Optional(Type.String({ description: "追问卡片标题" })),
   description: Type.Optional(Type.String({ description: "卡片辅助说明" })),
   question: Type.Optional(Type.String({ description: "兼容旧流程的合并问题；未传 questions 时服务端自动生成结构化问题" })),
@@ -234,7 +245,7 @@ const askClarificationSchema = Type.Object({
     fallbackValue: Type.Optional(Type.Unknown()),
     min: Type.Optional(Type.Number()),
     max: Type.Optional(Type.Number()),
-  }), { minItems: 1, maxItems: 6, description: "一个卡片内的结构化问题；前端以 Stepper 展示" })),
+  }), { minItems: 1, maxItems: 8, description: "模型可提交至多 8 个候选问题；服务端只保留当前实际缺失的最多 5 个关键字段" })),
   fallbackDefaults: Type.Optional(Type.Object({}, { additionalProperties: true, description: "若用户不回答时的默认值" })),
 });
 
@@ -440,13 +451,14 @@ const orderIdSchema = Type.Object({
 const classifyTurnSchema = Type.Object({
   intent: Type.Union([
     Type.Literal("new_request"),
+    Type.Literal("smalltalk"),
     Type.Literal("answer"),
     Type.Literal("confirm"),
     Type.Literal("modify"),
     Type.Literal("reject"),
     Type.Literal("question"),
     Type.Literal("cancel"),
-  ], { description: "用户这一轮消息的意图分类" }),
+  ], { description: "用户这一轮消息的意图分类。new_request 仅表示明确要求本地活动/行程规划；单纯问候、寒暄、能力询问或无关请求必须用 smalltalk" }),
   confidence: Type.Number({ description: "分类置信度 0.0-1.0" }),
   reason: Type.Optional(Type.String({ description: "简短分类理由" })),
 });
@@ -518,6 +530,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
   const submitCanonicalPlan = async (
     params: {
       summary: string;
+      idempotencyKey?: string;
       validationToken?: string;
       budgetToken?: string;
       weather?: {
@@ -534,47 +547,98 @@ export function getActivityPlannerTools(): ToolDefinition[] {
     if (!mgr) {
       return toolError("NO_ACTIVE_PLAN_STATE", "plan state not initialized");
     }
-    if (mgr.currentPhase !== "planning") {
-      return toolError(
-        "SUBMIT_PLAN_OUT_OF_PHASE",
-        `submit_plan 仅在 planning 阶段合法（当前阶段: ${mgr.currentPhase}）。`,
-      );
-    }
-    const artifacts = mgr.resolvePlanningArtifacts(
-      params.validationToken ?? "",
-      params.budgetToken ?? "",
-    );
-    if (!artifacts.ok) return toolError(artifacts.code, artifacts.message);
-
-    const submittedPlan = await completeSubmittedPlan({
+    const requestFingerprint = createHash("sha256").update(JSON.stringify({
       summary: params.summary,
-      validationToken: params.validationToken,
-      budgetToken: params.budgetToken,
-      timeline: artifacts.timeline,
-      budgetBreakdown: artifacts.budgetBreakdown,
-      warnings: artifacts.warnings,
-      totalCost: artifacts.budgetBreakdown.projectedTotal,
-      weather: params.weather,
-    }, mgr.intent);
-    const planHash = hashOf(submittedPlan);
-    const out = await mgr.dispatch({ type: "PLAN_SUBMITTED", plan: submittedPlan });
-    if (out.phase !== "plan_confirm") {
-      return toolError(
-        "PHASE_TRANSITION_FAILED",
-        `plan 提交后未进入 plan_confirm（当前 ${out.phase}；effects: ${out.effects.join(",")}）`,
+      validationToken: params.validationToken ?? "",
+      budgetToken: params.budgetToken ?? "",
+    })).digest("hex").slice(0, 24);
+    const idempotencyKey = params.idempotencyKey?.trim() ||
+      `plan_${requestFingerprint}`;
+    return mgr.withPlanSubmissionLock(idempotencyKey, async () => {
+      const previous = mgr.resolvePlanSubmission(idempotencyKey, requestFingerprint);
+      if (previous.status === "conflict") {
+        return toolError(
+          "IDEMPOTENCY_KEY_CONFLICT",
+          `幂等键 ${idempotencyKey} 已用于另一份方案，请为不同方案使用新的幂等键。`,
+        );
+      }
+      if (previous.status === "replay") {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({
+            planSubmitted: true,
+            plan: previous.plan,
+            planHash: previous.planHash,
+            idempotencyKey,
+            idempotentReplay: true,
+            nextPhase: "plan_confirm",
+            canonicalArtifactsUsed: true,
+            messageToUser: "该方案已提交；本次返回的是同一幂等请求的既有结果。",
+          }, null, 2) }],
+          details: {
+            planSubmitted: true,
+            plan: previous.plan,
+            planHash: previous.planHash,
+            idempotencyKey,
+            idempotentReplay: true,
+            canonicalArtifactsUsed: true,
+          },
+        };
+      }
+      if (mgr.currentPhase !== "planning") {
+        return toolError(
+          "SUBMIT_PLAN_OUT_OF_PHASE",
+          `submit_plan 仅在 planning 阶段合法（当前阶段: ${mgr.currentPhase}）。`,
+        );
+      }
+      const artifacts = mgr.resolvePlanningArtifacts(
+        params.validationToken ?? "",
+        params.budgetToken ?? "",
       );
-    }
-    return {
-      content: [{ type: "text" as const, text: JSON.stringify({
-        planSubmitted: true,
-        plan: submittedPlan,
+      if (!artifacts.ok) return toolError(artifacts.code, artifacts.message);
+
+      const submittedPlan = await completeSubmittedPlan({
+        summary: params.summary,
+        validationToken: params.validationToken,
+        budgetToken: params.budgetToken,
+        timeline: artifacts.timeline,
+        budgetBreakdown: artifacts.budgetBreakdown,
+        warnings: artifacts.warnings,
+        totalCost: artifacts.budgetBreakdown.projectedTotal,
+        weather: params.weather,
+      }, mgr.intent);
+      const planHash = hashOf(submittedPlan);
+      const out = await mgr.dispatchPlanSubmission(submittedPlan, {
+        idempotencyKey,
+        requestFingerprint,
         planHash,
-        nextPhase: "plan_confirm",
-        canonicalArtifactsUsed: true,
-        messageToUser: "方案已生成，请用户确认（确认/修改/重新生成）",
-      }, null, 2) }],
-      details: { planSubmitted: true, plan: submittedPlan, planHash, canonicalArtifactsUsed: true },
-    };
+      });
+      if (out.phase !== "plan_confirm") {
+        return toolError(
+          "PHASE_TRANSITION_FAILED",
+          `plan 提交后未进入 plan_confirm（当前 ${out.phase}；effects: ${out.effects.join(",")}）`,
+        );
+      }
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({
+          planSubmitted: true,
+          plan: submittedPlan,
+          planHash,
+          idempotencyKey,
+          idempotentReplay: false,
+          nextPhase: "plan_confirm",
+          canonicalArtifactsUsed: true,
+          messageToUser: "方案已生成，请用户确认（确认/修改/重新生成）",
+        }, null, 2) }],
+        details: {
+          planSubmitted: true,
+          plan: submittedPlan,
+          planHash,
+          idempotencyKey,
+          idempotentReplay: false,
+          canonicalArtifactsUsed: true,
+        },
+      };
+    });
   };
   const baseTools: ToolDefinition[] = [
 
@@ -583,7 +647,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
     {
       name: "classify_turn",
       label: "classify_turn",
-      description: "分类用户这一轮消息的意图：new_request（新请求）/ answer（回答追问）/ confirm（确认方案）/ modify（修改重规划）/ reject（推翻重来）/ question（提问，不改方案）/ cancel（取消）。**在 clarifying 和 plan_confirm 阶段，每轮必须先调此工具**，再据返回的 phase 决定后续动作。confirm 置信度<0.8 时不会转移，需向用户二次确认或提示点「确认并生成行程」按钮。",
+      description: "活动工作流入口与阶段意图分类。idle/completed/cancelled 阶段中，只有用户明确要求本地活动或行程规划时才传 new_request；单纯问候、寒暄、能力询问、无关请求或尚未表达规划意愿时传 smalltalk，phase 保持不变。clarifying/plan_confirm 阶段再使用 answer/confirm/modify/reject/question/cancel。confirm 置信度<0.8 时不会转移。",
       promptSnippet: "意图分类",
       parameters: classifyTurnSchema,
       execute: async (_id, params: Static<typeof classifyTurnSchema>) => {
@@ -637,6 +701,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
         if (params.submitPlan && params.plan) {
           return submitCanonicalPlan({
             summary: params.plan.summary,
+            idempotencyKey: params.plan.idempotencyKey,
             validationToken: params.plan.validationToken,
             budgetToken: params.plan.budgetToken,
             weather: params.plan.weather,
@@ -656,6 +721,11 @@ export function getActivityPlannerTools(): ToolDefinition[] {
             dietaryRestrictions: params.dietaryRestrictions,
             mood: params.mood,
             specialRequests: params.specialRequests,
+            endPolicy: params.endPolicy ?? mgr.intent.endPolicy ?? "last_poi",
+            ...(params.endPoint ? { endPoint: params.endPoint } : {}),
+            ...(params.transportPreferences
+              ? { transportPreferences: params.transportPreferences }
+              : {}),
           });
 
           let autoFilledFields: string[] = [];
@@ -714,7 +784,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
     {
       name: "ask_clarification",
       label: "ask_clarification",
-      description: `生成结构化追问卡片（仅 1 次！）。把所有缺失字段放进 questions，前端以可切换卡片展示选项和自定义输入。受 phase 守卫 + MAX_CLARIFICATIONS(${MAX_CLARIFICATIONS}) 硬限；不要输出 HTML。`,
+      description: `仅在用户已经明确要求规划、phase=intent_capture 且关键字段缺失时生成一次结构化追问卡片。missingFields 可省略，服务端按已记录 intent 自动推导；可选偏好不是追问理由，服务端会过滤非缺失字段。问候/寒暄不得调用。受 phase 守卫 + MAX_CLARIFICATIONS(${MAX_CLARIFICATIONS}) 硬限。`,
       promptSnippet: "1 次追问（硬限）",
       parameters: askClarificationSchema,
       execute: async (_id, params: Static<typeof askClarificationSchema>) => {
@@ -728,12 +798,20 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           };
         }
 
+        const canonicalMissing = getMissingCriticalFields(mgr.intent);
+        if (canonicalMissing.length === 0) {
+          return toolError(
+            "NO_MISSING_CRITICAL_FIELDS",
+            "当前没有缺失的关键字段，请直接进入自动规划，不要追问可选偏好。",
+          );
+        }
+        const canonicalSet = new Set<string>(canonicalMissing);
         const clarification = normalizeClarification({
           title: params.title,
           description: params.description,
-          missingFields: params.missingFields,
+          missingFields: canonicalMissing,
           question: params.question,
-          questions: params.questions,
+          questions: params.questions?.filter((item) => canonicalSet.has(item.field)),
           fallbackDefaults: params.fallbackDefaults as Record<string, unknown> | undefined,
         });
         const incremented = mgr.incrementClarification();
@@ -1315,7 +1393,29 @@ export function getActivityPlannerTools(): ToolDefinition[] {
 
   // ─── 应用 P0 包装（retry + fallback + phase guard） ──────────
 
-  return baseTools.map((tool) => {
+  const sequentialTools = new Set([
+    "classify_turn", "intent_parse", "submit_plan", "ask_clarification",
+    "validate_itinerary", "calculate_budget", "commit_itinerary", "plan_save",
+  ]);
+  const dataFallback = async (toolName: string, _params: unknown, err: Error) => ({
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify({
+        count: 0, items: [], error: true, fallback: true,
+        originalError: err.message,
+        message: `数据源暂时不可用 (${toolName})。不得编造 POI、价格、营业时间或位置；请缩小请求范围或如实告知用户。`,
+      }, null, 2),
+    }],
+    details: { fallback: true, originalError: err.message },
+  });
+
+  return baseTools.map((baseTool) => {
+    // Make concurrency policy explicit instead of depending on an SDK default:
+    // read-only queries can share a batch; state mutations serialize the batch.
+    const tool: ToolDefinition = {
+      ...baseTool,
+      executionMode: sequentialTools.has(baseTool.name) ? "sequential" : "parallel",
+    };
     // 写操作（行程交付）：重试 + 结构化错误
     if (tool.name === "commit_itinerary") {
       return wrapToolWithResilience(tool, {
@@ -1337,6 +1437,17 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       });
     }
 
+    // Route comparison/matrix already fan out internally. Retrying the entire
+    // fan-out multiplies AMap requests and leaves timed-out promises running.
+    if (tool.name === "compare_route_options" || tool.name === "distance_matrix") {
+      return wrapToolWithResilience(tool, {
+        retry: { maxRetries: 0 },
+        timeoutMs: 10_000,
+        fallback: dataFallback,
+        onMetric: recordToolMetric,
+      });
+    }
+
     // 数据查询类（POI / 天气 / 营业时间 / 通勤）：重试 + 降级到 LLM 知识
     if ([
       "detect_user_region", "geocode", "reverse_geocode", "get_weather",
@@ -1346,17 +1457,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
       "calculate_budget",
     ].includes(tool.name)) {
       return wrapToolWithResilience(tool, {
-        ...dataQueryWrapOpts(async (toolName, _params, err) => ({
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              count: 0, items: [], error: true, fallback: true,
-              originalError: err.message,
-              message: `数据源暂时不可用 (${toolName})。不得编造 POI、价格、营业时间或位置；请缩小请求范围或如实告知用户。`,
-            }, null, 2),
-          }],
-          details: { fallback: true, originalError: err.message },
-        })),
+        ...dataQueryWrapOpts(dataFallback),
 
         // Phase guard 已迁移到 Extension lib/extensions/phase-guard.ts (T3)
       });

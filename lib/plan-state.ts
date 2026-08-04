@@ -100,9 +100,28 @@ export interface PlanState {
     warningsJson?: string;
     at: number;
   };
+  itineraryValidations?: Record<string, {
+    token: string;
+    valid: boolean;
+    timelineJson: string;
+    warningsJson?: string;
+    at: number;
+  }>;
   lastBudgetCalculation?: {
     token: string;
     breakdownJson: string;
+    at: number;
+  };
+  budgetCalculations?: Record<string, {
+    token: string;
+    breakdownJson: string;
+    at: number;
+  }>;
+  /** Last successful logical plan submission, used to make retries idempotent. */
+  lastPlanSubmission?: {
+    idempotencyKey: string;
+    requestFingerprint: string;
+    planHash: string;
     at: number;
   };
   pendingClarification?: PendingClarification;
@@ -131,9 +150,13 @@ export type CanonicalPlanningArtifacts =
 // ─── 工具-phase 规则 ───────────────────────────────────────────────
 
 export const TOOL_PHASE_RULES: Record<string, PlanPhase[]> = {
-  classify_turn: ["clarifying", "plan_confirm"],
+  // idle/completed/cancelled are activation-gate phases: only an explicit
+  // activity request may transition to intent_capture.
+  classify_turn: ["idle", "completed", "cancelled", "clarifying", "plan_confirm"],
   intent_parse: ["intent_capture", "clarifying", "planning"],
-  submit_plan: ["planning"],
+  // plan_confirm is replay-only: the tool body rejects new submissions there,
+  // but may return the cached result for the same idempotency key.
+  submit_plan: ["planning", "plan_confirm"],
   ask_clarification: ["intent_capture"],
   detect_user_region: ["intent_capture", "planning"],
   geocode: ["planning"],
@@ -183,21 +206,63 @@ export const CRITICAL_FIELDS: CriticalField[] = ["date", "startTime", "partySize
 
 export function getMissingCriticalFields(intent: CapturedIntent): CriticalField[] {
   const missing: CriticalField[] = [];
-  if (!intent.date) missing.push("date");
-  if (!intent.startTime) missing.push("startTime");
-  if (intent.partySize === undefined) missing.push("partySize");
-  if (!intent.departurePoint) missing.push("departurePoint");
-  if (intent.budgetPerPerson === undefined) missing.push("budgetPerPerson");
+  if (!isValidDate(intent.date)) missing.push("date");
+  if (!isValidTime(intent.startTime)) missing.push("startTime");
+  if (!Number.isInteger(intent.partySize) || (intent.partySize ?? 0) < 1) missing.push("partySize");
+  if (
+    !intent.departurePoint ||
+    !intent.departurePoint.name?.trim() ||
+    !intent.departurePoint.city?.trim()
+  ) {
+    missing.push("departurePoint");
+  }
+  if (
+    typeof intent.budgetPerPerson !== "number" ||
+    !Number.isFinite(intent.budgetPerPerson) ||
+    intent.budgetPerPerson < 0
+  ) {
+    missing.push("budgetPerPerson");
+  }
   return missing;
 }
 
 export const MAX_CLARIFICATIONS = 1;
+
+function isValidDate(value: string | undefined): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? "");
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day;
+}
+
+function isValidTime(value: string | undefined): boolean {
+  const match = /^(\d{2}):(\d{2})$/.exec(value ?? "");
+  return !!match && Number(match[1]) <= 23 && Number(match[2]) <= 59;
+}
+
+function appendBoundedArtifact<T extends { at: number }>(
+  current: Record<string, T> | undefined,
+  token: string,
+  record: T,
+  maximum = 8,
+): Record<string, T> {
+  const entries = Object.entries({ ...(current ?? {}), [token]: record })
+    .sort(([, left], [, right]) => right.at - left.at)
+    .slice(0, maximum);
+  return Object.fromEntries(entries);
+}
 
 // ─── PlanStateManager ──────────────────────────────────────────────
 
 export class PlanStateManager {
   private readonly state: PlanState;
   private runtimeContext: PlanRuntimeContext;
+  private readonly planSubmissionInFlight = new Map<string, Promise<unknown>>();
   constructor(sessionId: string, _storageDir?: string, userId?: string, runtimeContext: PlanRuntimeContext = {}) {
     this.runtimeContext = runtimeContext;
     this.state = {
@@ -297,28 +362,42 @@ export class PlanStateManager {
     timeline: ProposedPlan["timeline"],
     warnings: PlanWarning[] = [],
   ): Promise<void> {
-    this.state.lastItineraryValidation = {
+    const record = {
       token,
       valid,
       timelineJson: JSON.stringify(timeline),
       warningsJson: JSON.stringify(warnings),
       at: Date.now(),
     };
+    this.state.lastItineraryValidation = record;
+    this.state.itineraryValidations = appendBoundedArtifact(
+      this.state.itineraryValidations,
+      token,
+      record,
+    );
     await this.persist();
   }
 
   verifyItineraryValidation(token: string | undefined, timeline: ProposedPlan["timeline"]): boolean {
-    const validation = this.state.lastItineraryValidation;
+    const validation = token
+      ? this.state.itineraryValidations?.[token] ?? this.state.lastItineraryValidation
+      : undefined;
     return !!validation?.valid && !!token && validation.token === token &&
       validation.timelineJson === JSON.stringify(timeline);
   }
 
   async recordBudgetCalculation(token: string, breakdown: BudgetBreakdown): Promise<void> {
-    this.state.lastBudgetCalculation = {
+    const record = {
       token,
       breakdownJson: JSON.stringify(breakdown),
       at: Date.now(),
     };
+    this.state.lastBudgetCalculation = record;
+    this.state.budgetCalculations = appendBoundedArtifact(
+      this.state.budgetCalculations,
+      token,
+      record,
+    );
     await this.persist();
   }
 
@@ -327,7 +406,9 @@ export class PlanStateManager {
     breakdown: BudgetBreakdown | undefined,
     totalCost: number | undefined,
   ): boolean {
-    const calculation = this.state.lastBudgetCalculation;
+    const calculation = token
+      ? this.state.budgetCalculations?.[token] ?? this.state.lastBudgetCalculation
+      : undefined;
     return !!calculation && !!token && !!breakdown &&
       calculation.token === token &&
       calculation.breakdownJson === JSON.stringify(breakdown) &&
@@ -346,16 +427,20 @@ export class PlanStateManager {
     validationToken: string,
     budgetToken: string,
   ): CanonicalPlanningArtifacts {
-    const validation = this.state.lastItineraryValidation;
-    if (!validation?.valid || validation.token !== validationToken) {
+    const validation = this.state.itineraryValidations?.[validationToken] ??
+      this.state.lastItineraryValidation;
+    if (!validation?.valid ||
+        (!this.state.itineraryValidations?.[validationToken] && validation.token !== validationToken)) {
       return {
         ok: false,
         code: "ITINERARY_TOKEN_INVALID",
         message: "validationToken 无效或已过期，请重新调用 validate_itinerary。",
       };
     }
-    const calculation = this.state.lastBudgetCalculation;
-    if (!calculation || calculation.token !== budgetToken) {
+    const calculation = this.state.budgetCalculations?.[budgetToken] ??
+      this.state.lastBudgetCalculation;
+    if (!calculation ||
+        (!this.state.budgetCalculations?.[budgetToken] && calculation.token !== budgetToken)) {
       return {
         ok: false,
         code: "BUDGET_TOKEN_INVALID",
@@ -389,6 +474,54 @@ export class PlanStateManager {
     }
   }
 
+  resolvePlanSubmission(
+    idempotencyKey: string,
+    requestFingerprint: string,
+  ):
+    | { status: "miss" }
+    | { status: "conflict"; planHash: string }
+    | { status: "replay"; plan: ProposedPlan; planHash: string } {
+    const submission = this.state.lastPlanSubmission;
+    if (!submission || submission.idempotencyKey !== idempotencyKey) {
+      return { status: "miss" };
+    }
+    if (submission.requestFingerprint !== requestFingerprint) {
+      return { status: "conflict", planHash: submission.planHash };
+    }
+    if (!this.state.plan) return { status: "miss" };
+    return { status: "replay", plan: this.state.plan, planHash: submission.planHash };
+  }
+
+  async withPlanSubmissionLock<T>(
+    idempotencyKey: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const inFlight = this.planSubmissionInFlight.get(idempotencyKey);
+    if (inFlight) return inFlight as Promise<T>;
+    const pending = operation();
+    this.planSubmissionInFlight.set(idempotencyKey, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.planSubmissionInFlight.get(idempotencyKey) === pending) {
+        this.planSubmissionInFlight.delete(idempotencyKey);
+      }
+    }
+  }
+
+  async dispatchPlanSubmission(
+    plan: ProposedPlan,
+    submission: Omit<NonNullable<PlanState["lastPlanSubmission"]>, "at">,
+  ): Promise<ReduceOutput> {
+    const previous = this.state.lastPlanSubmission;
+    this.state.lastPlanSubmission = { ...submission, at: Date.now() };
+    const out = await this.dispatch({ type: "PLAN_SUBMITTED", plan });
+    if (out.phase !== "plan_confirm") {
+      this.state.lastPlanSubmission = previous;
+    }
+    return out;
+  }
+
   get clientIp(): string | undefined {
     return this.runtimeContext.clientIp;
   }
@@ -409,7 +542,10 @@ export class PlanStateManager {
     this.state.phase = to;
     if (to === "planning" && from !== "planning") {
       this.state.lastItineraryValidation = undefined;
+      this.state.itineraryValidations = undefined;
       this.state.lastBudgetCalculation = undefined;
+      this.state.budgetCalculations = undefined;
+      this.state.lastPlanSubmission = undefined;
     }
     this.state.lastTransitionAt = Date.now();
     this.state.history.push({ phase: to, at: Date.now(), reason: reason ?? `from ${from}` });
@@ -433,7 +569,10 @@ export class PlanStateManager {
       this.state.phase = out.phase;
       if (out.phase === "planning" && from !== "planning") {
         this.state.lastItineraryValidation = undefined;
+        this.state.itineraryValidations = undefined;
         this.state.lastBudgetCalculation = undefined;
+        this.state.budgetCalculations = undefined;
+        this.state.lastPlanSubmission = undefined;
       }
       this.state.lastTransitionAt = Date.now();
       this.state.history.push({ phase: out.phase, at: Date.now(), reason: `event:${event.type} (from ${from})` });
@@ -482,8 +621,11 @@ export class PlanStateManager {
     return { allowed: true };
   }
 
-  incrementTurn(): void {
+  async incrementTurn(): Promise<void> {
     this.state.turnCount++;
+    // An idle/smalltalk turn may not cause any phase transition, but the UI and
+    // evaluators still need a durable state snapshot instead of a 404.
+    await this.persist();
   }
 
   async setUserId(userId: string): Promise<void> {
@@ -500,7 +642,10 @@ export class PlanStateManager {
     this.state.plan = null;
     this.state.recommendedPoiIds = [];
     this.state.lastItineraryValidation = undefined;
+    this.state.itineraryValidations = undefined;
     this.state.lastBudgetCalculation = undefined;
+    this.state.budgetCalculations = undefined;
+    this.state.lastPlanSubmission = undefined;
     this.state.pendingClarification = undefined;
     this.state.history.push({ phase: "idle", at: Date.now(), reason: "reset" });
   }

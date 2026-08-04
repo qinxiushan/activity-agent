@@ -187,14 +187,10 @@ export class AgentSessionWrapper {
 
   private async advancePlanPhase(): Promise<void> {
     const mgr = this.planState;
-    mgr.incrementTurn();
-    // 确定性引导：空闲/完成/取消 → 意图捕获（不看消息内容，任何消息都是新请求）。
-    // clarifying / plan_confirm 的意图分类改由 LLM 的 classify_turn 工具完成
-    // （route-B 改动 3：结构化意图分类取代正则 classifyUserConfirmation）。
-    const phase = mgr.currentPhase;
-    if (phase === "idle" || phase === "completed" || phase === "cancelled") {
-      await mgr.dispatch({ type: "USER_TURN_CLASSIFIED", intent: "new_request" });
-    }
+    await mgr.incrementTurn();
+    // Do not activate planning merely because a message arrived. The model must
+    // classify an explicit activity-planning request through classify_turn;
+    // phase guards keep slot-filling tools unavailable while the session is idle.
   }
 
   async send(command: Record<string, unknown>): Promise<unknown> {

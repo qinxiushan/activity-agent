@@ -14,6 +14,7 @@ import type { PlanPhase, PlanState, ProposedPlan } from "./plan-state";
 /** 用户这一轮消息的语义意图（由 LLM 结构化输出，取代正则 classifyUserConfirmation） */
 export type Intent =
   | "new_request"   // 新请求
+  | "smalltalk"     // 闲聊/问候/非活动规划，不激活工作流
   | "answer"        // 回答追问
   | "confirm"       // 确认方案
   | "modify"        // 修改方案
@@ -71,7 +72,7 @@ export function reduce(state: PlanState, event: PlanEvent): ReduceOutput {
     case "USER_TURN_CLASSIFIED": {
       const it = event.intent;
       if (it === "cancel") return goto("cancelled");
-      if (it === "question") return stay(); // ★ 提问不改相位（修复"提问炸方案"）
+      if (it === "question" || it === "smalltalk") return stay(); // 提问/闲聊不改相位
       if (phase === "idle" || phase === "completed" || phase === "cancelled") {
         if (it === "new_request") return goto("intent_capture");
       } else if (phase === "clarifying") {
