@@ -1352,6 +1352,11 @@ async function main() {
   log("HELP tool_duration_seconds present", rendered.includes("HELP tool_duration_seconds"));
   log("HELP tool_span_orphan_total present", rendered.includes("HELP tool_span_orphan_total"));
   log("HELP tool_span_persist_failure_total present", rendered.includes("HELP tool_span_persist_failure_total"));
+  log("HELP amap_request_total present", rendered.includes("HELP amap_request_total"));
+  log("HELP amap_request_duration_seconds present", rendered.includes("HELP amap_request_duration_seconds"));
+  log("HELP amap_queue_wait_seconds present", rendered.includes("HELP amap_queue_wait_seconds"));
+  log("HELP amap_inflight_requests present", rendered.includes("HELP amap_inflight_requests"));
+  log("HELP amap_cuqps_total present", rendered.includes("HELP amap_cuqps_total"));
   log("TYPE llm_tokens_total counter", rendered.includes("TYPE llm_tokens_total counter"));
   log("TYPE active_sessions gauge", rendered.includes("TYPE active_sessions gauge"));
   log("TYPE tool_call_total counter", rendered.includes("TYPE tool_call_total counter"));

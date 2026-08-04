@@ -2,9 +2,11 @@ import { AmapDataProvider } from "../lib/amap-data-provider";
 import { assessDataQuality } from "../lib/data-quality";
 import { MockDataProvider } from "../lib/mock-data-provider";
 import { RoutePlanningService } from "../lib/route-planning-service";
+import { AmapRequestScheduler } from "../lib/amap-request-scheduler";
 
 let pass = 0;
 let fail = 0;
+let forceCuqpsAttempts = 0;
 function assert(label: string, condition: boolean): void {
   if (condition) {
     pass++;
@@ -27,6 +29,12 @@ function fakeFetch(input: string | URL | Request): Promise<Response> {
   const path = url.pathname;
   if (url.searchParams.get("key") === "force-error") {
     return Promise.resolve(json({ status: "0", info: "INVALID_USER_KEY" }));
+  }
+  if (url.searchParams.get("key") === "force-cuqps" && path.endsWith("/geocode/geo")) {
+    forceCuqpsAttempts++;
+    if (forceCuqpsAttempts === 1) {
+      return Promise.resolve(json({ status: "0", info: "CUQPS_HAS_EXCEEDED_THE_LIMIT" }));
+    }
   }
   if (path.endsWith("/geocode/geo")) {
     return Promise.resolve(json({
@@ -80,6 +88,18 @@ function fakeFetch(input: string | URL | Request): Promise<Response> {
 }
 
 async function main(): Promise<void> {
+  const reservationClock = { now: () => 0, sleep: async (_ms: number) => {} };
+  const sameServiceScheduler = new AmapRequestScheduler({ qps: 3, clock: reservationClock });
+  const sameService = await Promise.all([0, 1, 2, 3].map(() =>
+    sameServiceScheduler.schedule("v3:distance", async () => true)));
+  const reservedWaits = sameService.map((item) => item.queueWaitMs);
+  assert("Same-service admissions never exceed configured 3 QPS", reservedWaits.join(",") === "0,334,668,1002");
+
+  const crossServiceScheduler = new AmapRequestScheduler({ qps: 3, clock: reservationClock });
+  const crossService = await Promise.all(["v3:direction/walking", "v3:direction/driving"].map((service) =>
+    crossServiceScheduler.schedule(service, async () => true)));
+  assert("Different AMap services remain concurrently admissible", crossService.every((item) => item.queueWaitMs === 0));
+
   const originalFetch = globalThis.fetch;
   globalThis.fetch = fakeFetch as typeof fetch;
   try {
@@ -120,6 +140,13 @@ async function main(): Promise<void> {
       rejectedInvalidKey = true;
     }
     assert("Provider rejects upstream API errors", rejectedInvalidKey);
+
+    forceCuqpsAttempts = 0;
+    const retryScheduler = new AmapRequestScheduler({ qps: 3, clock: reservationClock });
+    const recovered = await new AmapDataProvider("force-cuqps", new MockDataProvider(), retryScheduler)
+      .geocode("天安门", "北京");
+    assert("CUQPS retries only the failed provider request once", forceCuqpsAttempts === 2);
+    assert("CUQPS targeted retry recovers live provider result", recovered.source === "amap");
   } finally {
     globalThis.fetch = originalFetch;
   }

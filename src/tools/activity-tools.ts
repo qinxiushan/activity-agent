@@ -1442,7 +1442,8 @@ export function getActivityPlannerTools(): ToolDefinition[] {
     if (tool.name === "compare_route_options" || tool.name === "distance_matrix") {
       return wrapToolWithResilience(tool, {
         retry: { maxRetries: 0 },
-        timeoutMs: 10_000,
+        // QPS-safe provider admission may queue same-service matrix legs.
+        timeoutMs: 30_000,
         fallback: dataFallback,
         onMetric: recordToolMetric,
       });

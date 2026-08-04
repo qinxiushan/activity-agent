@@ -15,6 +15,8 @@ import type {
 } from "./data-provider";
 import type { TransitMode, RouteResult } from "./route-service";
 import type { WeatherForecast } from "./weather-service";
+import { amapRequestScheduler, type AmapRequestScheduler } from "./amap-request-scheduler";
+import { metrics } from "./metrics-registry";
 
 const BASE_URL = "https://restapi.amap.com/v3";
 const ACTIVITY_TYPE_PREFIXES = ["08", "10", "11", "14", "16"];
@@ -84,7 +86,11 @@ export class AmapDataProvider implements DataProvider {
   readonly kind = "amap" as const;
   private readonly poiCache = new Map<string, ProviderPoi>();
 
-  constructor(private readonly apiKey: string, private readonly fallback: DataProvider) {}
+  constructor(
+    private readonly apiKey: string,
+    private readonly fallback: DataProvider,
+    private readonly scheduler: AmapRequestScheduler = amapRequestScheduler,
+  ) {}
 
   private async get<T>(path: string, params: Record<string, string | number | boolean | undefined>): Promise<T> {
     const url = new URL(`${BASE_URL}/${path}`);
@@ -92,10 +98,10 @@ export class AmapDataProvider implements DataProvider {
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
     }
-    const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
-    const body = await response.json() as { status?: string; info?: string } & T;
-    if (!response.ok || body.status !== "1") throw new Error(`Amap ${path} failed: ${body.info ?? response.status}`);
-    return body;
+    return this.requestJson<T>(`v3:${path}`, url, (response, body) => ({
+      ok: response.ok && body.status === "1",
+      reason: String(body.info ?? response.status),
+    }));
   }
 
   private async getV4<T>(path: string, params: Record<string, string | number | boolean | undefined>): Promise<T> {
@@ -104,10 +110,49 @@ export class AmapDataProvider implements DataProvider {
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
     }
-    const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
-    const body = await response.json() as { errcode?: number; errmsg?: string } & T;
-    if (!response.ok || body.errcode !== 0) throw new Error(`Amap v4 ${path} failed: ${body.errmsg ?? response.status}`);
-    return body;
+    return this.requestJson<T>(`v4:${path}`, url, (response, body) => ({
+      ok: response.ok && body.errcode === 0,
+      reason: String(body.errmsg ?? response.status),
+    }));
+  }
+
+  private async requestJson<T>(
+    service: string,
+    url: URL,
+    validate: (response: Response, body: Record<string, unknown>) => { ok: boolean; reason: string },
+  ): Promise<T> {
+    const cooldownMs = Math.max(1_000, Number(process.env.AMAP_CUQPS_COOLDOWN_MS ?? 1_200) || 1_200);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const scheduled = await this.scheduler.schedule(service, async () => {
+          const response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
+          const body = await response.json() as Record<string, unknown> & T;
+          return { response, body };
+        });
+        metrics.observe("amap_request_duration_seconds", scheduled.executionMs / 1_000, { service });
+        const verdict = validate(scheduled.value.response, scheduled.value.body);
+        if (verdict.ok) {
+          metrics.inc("amap_request_total", { service, status: "success" });
+          return scheduled.value.body;
+        }
+
+        const quotaExceeded = verdict.reason.includes("CUQPS_HAS_EXCEEDED_THE_LIMIT");
+        metrics.inc("amap_request_total", { service, status: quotaExceeded ? "cuqps" : "upstream_error" });
+        if (quotaExceeded) {
+          metrics.inc("amap_cuqps_total", { service });
+          if (attempt === 0) {
+            this.scheduler.defer(service, cooldownMs);
+            continue;
+          }
+        }
+        throw new Error(`Amap ${service} failed: ${verdict.reason}`);
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("Amap ")) throw error;
+        metrics.inc("amap_request_total", { service, status: "transport_error" });
+        throw error;
+      }
+    }
+    throw new Error(`Amap ${service} failed after CUQPS retry`);
   }
 
   private remember(raw: AmapPoi, category: ProviderPoi["category"], city: string): ProviderPoi | undefined {
@@ -390,11 +435,10 @@ export class AmapDataProvider implements DataProvider {
   }
 
   async computeDistanceMatrix(points: RoutePoint[], mode: DistanceMatrixMode): Promise<DistanceMatrixEntry[]> {
-    const entries: DistanceMatrixEntry[] = [];
     const type = mode === "walking" ? 3 : mode === "driving" ? 1 : 0;
-    for (const destination of points) {
+    const rows = await Promise.all(points.map(async (destination): Promise<DistanceMatrixEntry[]> => {
       const origins = points.filter((point) => point.id !== destination.id);
-      if (origins.length === 0) continue;
+      if (origins.length === 0) return [];
       const data = await this.get<{
         results?: Array<{ origin_id?: string; distance?: string; duration?: string }>;
       }>("distance", {
@@ -402,12 +446,13 @@ export class AmapDataProvider implements DataProvider {
         destination: `${destination.lng},${destination.lat}`,
         type,
       });
+      const row: DistanceMatrixEntry[] = [];
       for (const [index, result] of (data.results ?? []).entries()) {
         // 高德 origin_id 从 1 开始；结果顺序与 origins 输入顺序一致。
         const originIndex = Number(result.origin_id) - 1;
         const origin = origins[Number.isInteger(originIndex) && originIndex >= 0 ? originIndex : index] ?? origins[index];
         if (!origin) continue;
-        entries.push({
+        row.push({
           fromId: origin.id,
           toId: destination.id,
           distanceMeters: Math.round(Number(result.distance) || 0),
@@ -415,7 +460,9 @@ export class AmapDataProvider implements DataProvider {
           source: "amap",
         });
       }
-    }
+      return row;
+    }));
+    const entries = rows.flat();
     if (entries.length !== points.length * Math.max(0, points.length - 1)) {
       throw new Error(`Amap distance matrix incomplete: ${entries.length} entries for ${points.length} points`);
     }

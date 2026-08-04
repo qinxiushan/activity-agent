@@ -160,3 +160,8 @@ metrics.registerCounter("tool_span_total", "Persisted SDK tool execution spans",
 metrics.registerHistogram("tool_duration_seconds", "Exact SDK tool execution duration in seconds", ["tool", "status"]);
 metrics.registerCounter("tool_span_orphan_total", "Tool execution end events without a matching start");
 metrics.registerCounter("tool_span_persist_failure_total", "Tool execution spans that failed to persist");
+metrics.registerCounter("amap_request_total", "AMap HTTP requests by service and result", ["service", "status"]);
+metrics.registerHistogram("amap_request_duration_seconds", "AMap HTTP request duration excluding queue wait", ["service"]);
+metrics.registerHistogram("amap_queue_wait_seconds", "AMap per-service admission queue wait", ["service"]);
+metrics.registerGauge("amap_inflight_requests", "AMap requests currently in flight", ["service"]);
+metrics.registerCounter("amap_cuqps_total", "AMap CUQPS quota responses", ["service"]);
