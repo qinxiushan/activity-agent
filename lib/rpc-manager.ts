@@ -538,6 +538,17 @@ export async function startRpcSession(
 
     const activityToolsList = ACTIVITY_TOOLS;
     const resourceLoader = createActivityResourceLoader(cwd, agentDir);
+    // pi SDK reloads only loaders it creates itself. A caller-supplied loader
+    // must be loaded explicitly or inline Extension factories stay dormant.
+    await resourceLoader.reload();
+    const extensionResult = resourceLoader.getExtensions();
+    if (extensionResult.errors.length > 0 || extensionResult.extensions.length < 2) {
+      const reasons = extensionResult.errors.map((item) => `${item.path}: ${item.error}`).join("; ");
+      throw new Error(
+        `Activity extensions failed to load: expected 2, loaded ${extensionResult.extensions.length}` +
+        (reasons ? ` (${reasons})` : ""),
+      );
+    }
 
     const { session: inner } = await createAgentSession({
       cwd,
