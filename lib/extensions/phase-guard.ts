@@ -24,8 +24,6 @@ const BUSINESS_TOOLS = new Set([
  * Layer 3: 工具 body 自检 (activity-tools.ts)
  */
 export default function phaseGuardExtension(pi: ExtensionAPI): void {
-  const toolStartMeta = new Map<string, { at: number; userId: string | null; sessionId: string; argsSummary: string }>();
-
   // ── 阶段守卫 ───────────────────────────────────────────
   pi.on("tool_call", async (event) => {
     if (!BUSINESS_TOOLS.has(event.toolName)) return;
@@ -33,9 +31,6 @@ export default function phaseGuardExtension(pi: ExtensionAPI): void {
     if (!mgr) return;
     const userId = mgr.userId ?? null;
     const sessionId = mgr.current.sessionId;
-    const args = (event as { input?: unknown; args?: unknown }).input ?? (event as { args?: unknown }).args;
-    const argsSummary = summarizeAuditDetail(args);
-
     const result = mgr.guardToolCall(event.toolName);
     if (!result.allowed) {
       audit({
@@ -74,33 +69,11 @@ export default function phaseGuardExtension(pi: ExtensionAPI): void {
         };
       }
     }
-
-    toolStartMeta.set(event.toolCallId, {
-      at: Date.now(),
-      userId,
-      sessionId,
-      argsSummary,
-    });
   });
 
   // ── 工具结果脱敏（T5）─────────────────────────────────
   pi.on("tool_result", async (event) => {
     if (!BUSINESS_TOOLS.has(event.toolName)) return;
-    const started = toolStartMeta.get(event.toolCallId);
-    toolStartMeta.delete(event.toolCallId);
-    if (started) {
-      audit({
-        userId: started.userId,
-        sessionId: started.sessionId,
-        eventType: "tool_call",
-        toolName: event.toolName,
-        detail: {
-          args: started.argsSummary,
-          durationMs: Math.max(0, Date.now() - started.at),
-          isError: event.isError === true,
-        },
-      });
-    }
     if (!Array.isArray(event.content)) return;
     if (event.isError) return;
 
@@ -110,9 +83,10 @@ export default function phaseGuardExtension(pi: ExtensionAPI): void {
       const { sanitized, truncated, reason, keyword } = sanitizeToolResult(event.toolName, block.text);
       if (truncated || reason) modified = true;
       if (reason === "prompt_injection_detected") {
+        const mgr = getActivePlanState();
         audit({
-          userId: started?.userId ?? null,
-          sessionId: started?.sessionId ?? null,
+          userId: mgr?.userId ?? null,
+          sessionId: mgr?.current.sessionId ?? null,
           eventType: "injection_detected",
           toolName: event.toolName,
           detail: {
@@ -126,14 +100,4 @@ export default function phaseGuardExtension(pi: ExtensionAPI): void {
 
     if (modified) return { content: newContent };
   });
-}
-
-function summarizeAuditDetail(value: unknown, max = 500): string {
-  if (value === undefined || value === null) return "";
-  try {
-    const text = typeof value === "string" ? value : JSON.stringify(value);
-    return text.length > max ? text.slice(0, max) + "…" : text;
-  } catch {
-    return String(value).slice(0, max);
-  }
 }

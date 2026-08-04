@@ -53,6 +53,10 @@ import {
 import { canAccessOwner } from "../lib/session-ownership";
 import { resolveUserContextFromValues } from "../lib/user-context";
 import { buildAuditInsertPlaceholders } from "../lib/audit-logger";
+import {
+  listToolExecutionSpans,
+  ToolTelemetryRecorder,
+} from "../lib/tool-telemetry";
 import { promises as afs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1285,6 +1289,52 @@ async function main() {
   );
   log("Extension passes when no plan state loaded", noPlanStateResult === undefined);
 
+  section("🔭 Tool telemetry: SDK lifecycle spans");
+  let wallMs = Date.parse("2026-08-04T10:00:00.000Z");
+  let monotonicMs = 100;
+  const recorder = new ToolTelemetryRecorder({
+    wallNow: () => wallMs,
+    monotonicNow: () => monotonicMs,
+  });
+  recorder.start("telemetry-session", "call-a", "get_weather");
+  wallMs += 1_250;
+  monotonicMs += 1_250.375;
+  const exactSpan = recorder.finish("telemetry-session", "call-a", "get_weather");
+  log("ToolSpan uses monotonic start/end duration", exactSpan.durationMs === 1_250.375);
+  log("ToolSpan records exact lifecycle timestamps", exactSpan.startedAt === "2026-08-04T10:00:00.000Z" && exactSpan.endedAt === "2026-08-04T10:00:01.250Z");
+  log("ToolSpan successful correlation is not orphaned", exactSpan.status === "success" && exactSpan.orphanEnd === false);
+
+  const orphanSpan = recorder.finish("telemetry-session", "missing", "distance_matrix", { isError: true });
+  log("ToolSpan marks unmatched end event as orphan", orphanSpan.orphanEnd && orphanSpan.durationMs === 0 && orphanSpan.status === "error");
+  const previousToolSpanDir = process.env.TOOL_SPAN_DIR;
+  process.env.TOOL_SPAN_DIR = path.join(tmpRoot, "tool-spans");
+  const { default: toolTelemetryExtension } = await import("../lib/extensions/tool-telemetry");
+  const telemetryHandlers = new Map<string, (event: never, ctx: never) => Promise<void>>();
+  toolTelemetryExtension({
+    on: (event: string, handler: (event: never, ctx: never) => Promise<void>) => {
+      telemetryHandlers.set(event, handler);
+    },
+  } as never);
+  log("Telemetry extension registers SDK execution start/end", telemetryHandlers.has("tool_execution_start") && telemetryHandlers.has("tool_execution_end"));
+  const telemetryContext = { sessionManager: { getSessionId: () => "extension-session" } } as never;
+  await telemetryHandlers.get("tool_execution_start")!(
+    { toolCallId: "extension-call", toolName: "compare_route_options", args: {} } as never,
+    telemetryContext,
+  );
+  await telemetryHandlers.get("tool_execution_end")!(
+    {
+      toolCallId: "extension-call",
+      toolName: "compare_route_options",
+      result: { details: { fallback: true } },
+      isError: false,
+    } as never,
+    telemetryContext,
+  );
+  const persistedSpans = await listToolExecutionSpans({ sessionId: "extension-session" });
+  log("Telemetry persists spans without active plan state", persistedSpans.length === 1);
+  log("Telemetry preserves fallback status", persistedSpans[0]?.status === "fallback" && persistedSpans[0]?.fallbackUsed === true);
+  restoreEnv("TOOL_SPAN_DIR", previousToolSpanDir);
+
   section("🔌 P0 Stage-1: Prometheus Metrics (T4)");
   const { metrics: promMetrics } = await import("../lib/metrics-registry");
 
@@ -1298,6 +1348,10 @@ async function main() {
   log("HELP tool_call_total present", rendered.includes("HELP tool_call_total"));
   log("HELP turn_duration_seconds present", rendered.includes("HELP turn_duration_seconds"));
   log("HELP rate_limit_hits_total present", rendered.includes("HELP rate_limit_hits_total"));
+  log("HELP tool_span_total present", rendered.includes("HELP tool_span_total"));
+  log("HELP tool_duration_seconds present", rendered.includes("HELP tool_duration_seconds"));
+  log("HELP tool_span_orphan_total present", rendered.includes("HELP tool_span_orphan_total"));
+  log("HELP tool_span_persist_failure_total present", rendered.includes("HELP tool_span_persist_failure_total"));
   log("TYPE llm_tokens_total counter", rendered.includes("TYPE llm_tokens_total counter"));
   log("TYPE active_sessions gauge", rendered.includes("TYPE active_sessions gauge"));
   log("TYPE tool_call_total counter", rendered.includes("TYPE tool_call_total counter"));

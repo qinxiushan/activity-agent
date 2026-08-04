@@ -1,7 +1,7 @@
 /**
  * Metrics Registry - Prometheus text-format metrics collector
  *
- * 自实现（不引入 prom-client），暴露 5 个核心 metric：
+ * 自实现（不引入 prom-client），暴露核心运行指标：
  * 1. llm_tokens_total      counter   — 累计 token 量（按 model 区分）
  * 2. active_sessions       gauge     — 当前活跃 session 数
  * 3. tool_call_total       counter   — 工具调用次数（按 tool/status 区分）
@@ -156,3 +156,7 @@ metrics.registerGauge("active_sessions", "Number of active agent sessions");
 metrics.registerCounter("tool_call_total", "Total tool calls", ["tool", "status"]);
 metrics.registerHistogram("turn_duration_seconds", "Turn duration in seconds");
 metrics.registerCounter("rate_limit_hits_total", "Total rate limit hits", ["action"]);
+metrics.registerCounter("tool_span_total", "Persisted SDK tool execution spans", ["tool", "status"]);
+metrics.registerHistogram("tool_duration_seconds", "Exact SDK tool execution duration in seconds", ["tool", "status"]);
+metrics.registerCounter("tool_span_orphan_total", "Tool execution end events without a matching start");
+metrics.registerCounter("tool_span_persist_failure_total", "Tool execution spans that failed to persist");

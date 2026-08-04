@@ -15,6 +15,7 @@ import { EventAdapter } from "./event-adapter";
 import type { StandardEvent } from "./event-types";
 import { metrics } from "./metrics-registry";
 import phaseGuardExtension from "./extensions/phase-guard";
+import toolTelemetryExtension from "./extensions/tool-telemetry";
 import { closePool } from "./db";
 import { closeRedis } from "./redis";
 
@@ -26,7 +27,7 @@ function createActivityResourceLoader(cwd: string, agentDir: string): ResourceLo
   const baseLoader = new DefaultResourceLoader({
     cwd,
     agentDir,
-    extensionFactories: [phaseGuardExtension],
+    extensionFactories: [phaseGuardExtension, toolTelemetryExtension],
   });
   return {
     getExtensions: () => baseLoader.getExtensions(),
