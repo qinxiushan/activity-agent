@@ -120,7 +120,9 @@ function passingRun(scenario: EvalScenario): EvalRun {
       phase: scenario.oracle.expectedFinalPhases[0]!,
       turnCount: 1,
       clarificationCount: Math.min(1, scenario.oracle.maxClarifications ?? 1),
-      intent: scenario.oracle.requiredIntent,
+      intent: scenario.oracle.requiredIntent
+        ? structuredClone(scenario.oracle.requiredIntent)
+        : undefined,
       plan: scenario.oracle.planRequired ? plan() : undefined,
     },
     metrics: { durationMs: 1, toolCallCount: toolNames.length, errorCount: 0 },
@@ -230,6 +232,30 @@ async function main(): Promise<void> {
   };
   ok("intent matcher rejects a different place in the same city",
     gradeEvalRun(shanghaiScenario, differentPlaceRun).failureCodes.includes("OUTCOME_REQUIRED_INTENT"));
+
+  const dietaryScenario = dataset.find((item) => item.id === "complete-dietary")!;
+  const semanticDietaryRun = passingRun(dietaryScenario);
+  semanticDietaryRun.finalState!.intent!.dietaryRestrictions = ["vegetarian"];
+  ok("intent matcher normalizes Chinese and English dietary aliases",
+    gradeEvalRun(dietaryScenario, semanticDietaryRun).hardPassed);
+  semanticDietaryRun.finalState!.intent!.dietaryRestrictions = ["vegan"];
+  ok("intent matcher keeps vegetarian and vegan semantically distinct",
+    gradeEvalRun(dietaryScenario, semanticDietaryRun).failureCodes.includes("OUTCOME_REQUIRED_INTENT"));
+
+  const recoverableSubmitRun = passingRun(dataset[0]!);
+  const successfulSubmit = recoverableSubmitRun.events.find((event) =>
+    event.type === "tool_end" && event.toolName === "submit_plan")!;
+  recoverableSubmitRun.events.splice(recoverableSubmitRun.events.indexOf(successfulSubmit), 0, {
+    sequence: successfulSubmit.sequence,
+    at: new Date().toISOString(),
+    type: "tool_end",
+    toolName: "submit_plan",
+    ok: true,
+    result: { error: true, code: "BUDGET_TOKEN_INVALID" },
+  });
+  recoverableSubmitRun.events.forEach((event, index) => { event.sequence = index + 1; });
+  ok("trajectory counts successful submissions rather than recoverable attempts",
+    gradeEvalRun(dataset[0]!, recoverableSubmitRun).hardPassed);
 
   const harnessScenario: EvalScenario = {
     id: "harness-confirm",

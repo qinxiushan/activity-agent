@@ -114,7 +114,7 @@
     "version": "1.0.0",
     "description": "缺出发地时一次追问",
     "tags": ["clarification", "missing_departure"],
-    "user":{"initialMessage":"2026年8月1日10点，两个人在北京玩到18点，人均预算300元。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"三里屯","partySize":2,"budgetPerPerson":300},"steps":[{"id":"answer-departure","trigger":{"kind":"phase","phase":"clarifying"},"action":{"type":"clarification_answers","answers":{"departurePoint":"三里屯"}},"once":true}]},
+    "user":{"initialMessage":"2026年8月1日10点，两个人在北京玩到18点，人均预算300元。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","endTime":"18:00","departurePoint":"三里屯","partySize":2,"budgetPerPerson":300},"steps":[{"id":"answer-departure","trigger":{"kind":"phase","phase":"clarifying"},"action":{"type":"clarification_answers","answers":{"departurePoint":{"name":"三里屯","city":"北京"}}},"once":true}]},
     "environment":{"fixtureId":"mock-v1"},
     "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requiredIntent":{"departurePoint":{"name":"三里屯","city":"北京"}},"requiredTools":["ask_clarification","validate_itinerary","calculate_budget","submit_plan"],"toolOrder":[{"before":"ask_clarification","after":"submit_plan"}],"maxToolCalls":{"ask_clarification":1,"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
   },
@@ -141,7 +141,7 @@
     "version": "1.0.0",
     "description": "多个缺失字段在同一卡片一次补齐",
     "tags": ["clarification", "multiple_missing", "historical_regression"],
-    "user":{"initialMessage":"想在北京安排一次约会。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","departurePoint":"三里屯","partySize":2,"budgetPerPerson":300},"steps":[{"id":"answer-all","trigger":{"kind":"phase","phase":"clarifying"},"action":{"type":"clarification_answers","answers":{"date":"2026-08-01","startTime":"10:00","departurePoint":"三里屯","partySize":2,"budgetPerPerson":300}},"once":true}]},
+    "user":{"initialMessage":"想在北京安排一次约会。","hiddenGoal":{"date":"2026-08-01","startTime":"10:00","departurePoint":"三里屯","partySize":2,"budgetPerPerson":300},"steps":[{"id":"answer-all","trigger":{"kind":"phase","phase":"clarifying"},"action":{"type":"clarification_answers","answers":{"date":"2026-08-01","startTime":"10:00","departurePoint":{"name":"三里屯","city":"北京"},"partySize":2,"budgetPerPerson":300}},"once":true}]},
     "environment":{"fixtureId":"mock-v1"},
     "oracle":{"expectedFinalPhases":["plan_confirm"],"planRequired":true,"requireNonEmptyTimeline":true,"requireChronologicalTimeline":true,"requireBudgetInvariant":true,"requiredIntent":{"date":"2026-08-01","startTime":"10:00","partySize":2,"budgetPerPerson":300},"requiredTools":["ask_clarification","validate_itinerary","calculate_budget","submit_plan"],"toolOrder":[{"before":"ask_clarification","after":"submit_plan"}],"maxToolCalls":{"ask_clarification":1,"submit_plan":1},"maxClarifications":1,"requireConfirmationBeforeCommit":true}
   },

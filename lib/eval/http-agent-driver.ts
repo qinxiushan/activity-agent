@@ -115,10 +115,20 @@ export class HttpAgentDriver implements EvalAgentDriver {
 
   async send(command: EvalAgentCommand): Promise<EvalAgentTurn> {
     if (!this.sessionId) throw new Error("HTTP Agent driver has not started");
-    await this.request(`/api/agent/${encodeURIComponent(this.sessionId)}`, {
+    const response = await this.request(`/api/agent/${encodeURIComponent(this.sessionId)}`, {
       method: "POST",
       body: JSON.stringify(command),
     });
+    const body = await response.json() as {
+      success?: boolean;
+      data?: { error?: string; message?: string };
+      error?: string;
+    };
+    if (body.error || body.data?.error) {
+      const code = body.data?.error ?? body.error ?? "AGENT_COMMAND_FAILED";
+      const message = body.data?.message ? `: ${body.data.message}` : "";
+      throw new Error(`${code}${message}`);
+    }
     return this.readCompletedTurn();
   }
 

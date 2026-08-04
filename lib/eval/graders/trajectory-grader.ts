@@ -6,9 +6,19 @@ interface CompletedToolCall {
   phase?: string;
 }
 
+function isDomainError(result: unknown): boolean {
+  return typeof result === "object" &&
+    result !== null &&
+    (result as { error?: unknown }).error === true;
+}
+
 function completedTools(run: EvalRun): CompletedToolCall[] {
   return run.events
-    .filter((event) => event.type === "tool_end" && event.toolName && event.ok !== false)
+    .filter((event) =>
+      event.type === "tool_end" &&
+      event.toolName &&
+      event.ok !== false &&
+      !isDomainError(event.result))
     .map((event) => ({
       name: event.toolName!,
       sequence: event.sequence,
@@ -79,7 +89,7 @@ export function gradeTrajectory(scenario: EvalScenario, run: EvalRun): EvalCheck
       category: "trajectory",
       passed: actual <= maximum,
       severity: "hard",
-      message: `${name} call count is ${actual}/${maximum}`,
+      message: `${name} successful call count is ${actual}/${maximum}`,
     });
   }
 
@@ -103,9 +113,11 @@ export function gradeTrajectory(scenario: EvalScenario, run: EvalRun): EvalCheck
   checks.push({
     id: "TRAJECTORY_NO_TOOL_ERRORS",
     category: "trajectory",
-    passed: run.events.every((event) => event.type !== "tool_end" || event.ok !== false),
+    passed: run.events.every((event) =>
+      event.type !== "tool_end" || event.ok !== false && !isDomainError(event.result)),
     severity: "diagnostic",
-    message: `${run.events.filter((event) => event.type === "tool_end" && event.ok === false).length} tool error(s) observed`,
+    message: `${run.events.filter((event) =>
+      event.type === "tool_end" && (event.ok === false || isDomainError(event.result))).length} tool error(s) observed`,
   });
 
   return checks;
