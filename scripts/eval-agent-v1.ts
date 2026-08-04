@@ -10,6 +10,7 @@ interface CliOptions {
   server: string;
   dataset: string;
   repetitions: number;
+  timeoutMs: number;
   limit?: number;
   scenarioId?: string;
   output?: string;
@@ -22,13 +23,18 @@ function parseArgs(argv: string[]): CliOptions {
   };
   const repetitions = Number(value("--repetitions") ?? process.env.EVAL_REPETITIONS ?? 1);
   const limitRaw = value("--limit") ?? process.env.EVAL_LIMIT;
+  const timeoutMs = Number(value("--timeout-ms") ?? process.env.EVAL_TIMEOUT_MS ?? 300_000);
   if (!Number.isInteger(repetitions) || repetitions < 1 || repetitions > 10) {
     throw new Error("--repetitions must be an integer between 1 and 10");
+  }
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 10_000 || timeoutMs > 900_000) {
+    throw new Error("--timeout-ms must be an integer between 10000 and 900000");
   }
   return {
     server: value("--server") ?? process.env.EVAL_SERVER ?? "http://localhost:30142",
     dataset: value("--dataset") ?? "evals/datasets/agent-regression-v1.json",
     repetitions,
+    timeoutMs,
     limit: limitRaw ? Number(limitRaw) : undefined,
     scenarioId: value("--id"),
     output: value("--output"),
@@ -61,6 +67,12 @@ function selectScenarios(all: EvalScenario[], options: CliOptions): EvalScenario
   return selected;
 }
 
+function percentile(values: number[], ratio: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.max(0, Math.ceil(ratio * sorted.length) - 1)] ?? 0;
+}
+
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   const scenarios = selectScenarios(
@@ -72,6 +84,7 @@ async function main(): Promise<void> {
   console.log(`\n=== Eval V1 Agent Regression ===`);
   console.log(`Target: ${target.provider}/${target.modelId}`);
   console.log(`Scenarios: ${scenarios.length} × ${options.repetitions}\n`);
+  console.log(`Per-turn timeout: ${options.timeoutMs}ms\n`);
 
   for (const scenario of scenarios) {
     for (let trial = 1; trial <= options.repetitions; trial++) {
@@ -81,6 +94,7 @@ async function main(): Promise<void> {
         cwd,
         target,
         userId: `eval-v1-${scenario.id}-${trial}`,
+        timeoutMs: options.timeoutMs,
       });
       try {
         const result = await new EvalHarness().run(scenario, driver);
@@ -107,12 +121,17 @@ async function main(): Promise<void> {
       results.filter((item) => item.grade.failureCodes.includes(code)).length,
     ]),
   );
+  const durations = results.map((item) => item.run.metrics.durationMs);
+  const timeoutCount = results.filter((item) => item.run.events.some((event) =>
+    event.type === "error" && /did not become idle|timeout|timed out/i.test(event.message ?? ""),
+  )).length;
   const report = {
     schemaVersion: "eval-report-v1",
     generatedAt: new Date().toISOString(),
     dataset: path.resolve(options.dataset),
     target,
     repetitions: options.repetitions,
+    timeoutMs: options.timeoutMs,
     metrics: {
       scenarioCount: scenarios.length,
       trialCount: results.length,
@@ -122,6 +141,12 @@ async function main(): Promise<void> {
         results.reduce((sum, item) => sum + item.run.metrics.durationMs, 0) /
         Math.max(1, results.length),
       ),
+      p50DurationMs: percentile(durations, 0.5),
+      p90DurationMs: percentile(durations, 0.9),
+      p95DurationMs: percentile(durations, 0.95),
+      maxDurationMs: Math.max(0, ...durations),
+      timeoutCount,
+      timeoutRate: Number((timeoutCount / Math.max(1, results.length)).toFixed(4)),
       averageToolCalls: Number((
         results.reduce((sum, item) => sum + item.run.metrics.toolCallCount, 0) /
         Math.max(1, results.length)
