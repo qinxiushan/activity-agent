@@ -28,6 +28,10 @@ function matches(
 ): boolean {
   const trigger = step.trigger;
   if (trigger.kind === "phase") return state.phase === trigger.phase;
+  if (trigger.kind === "plan_available") return Boolean(state.plan);
+  if (trigger.kind === "clarification_available") {
+    return state.pendingClarification?.status === "pending";
+  }
   if (trigger.kind === "assistant_includes") {
     return events.some((event) =>
       event.type === "assistant_message" && event.message?.includes(trigger.text));

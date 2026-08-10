@@ -19,7 +19,8 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getPlanStateRepo } from "./storage";
-import { reduce, type PlanEvent, type ReduceOutput } from "./plan-reducer";
+import { reduce, reduceObserveOnly, type PlanEvent, type ReduceOutput } from "./plan-reducer";
+import { getWorkflowControlDescriptor } from "./workflow-control/config";
 import type { BudgetBreakdown } from "./budget-service";
 import {
   applyClarificationAnswers,
@@ -558,11 +559,14 @@ export class PlanStateManager {
    * reduce() 决定下一相位，isTransitionAllowed 兜底拦非法转移，仅在变化时持久化。
    */
   async dispatch(event: PlanEvent): Promise<ReduceOutput> {
-    const out = reduce(this.state, event);
+    const control = getWorkflowControlDescriptor();
+    const out = control.enforcesReducerPreconditions
+      ? reduce(this.state, event)
+      : reduceObserveOnly(this.state, event);
     let changed = false;
 
     if (out.phase !== this.state.phase) {
-      if (!isTransitionAllowed(this.state.phase, out.phase)) {
+      if (control.enforcesReducerPreconditions && !isTransitionAllowed(this.state.phase, out.phase)) {
         return { phase: this.state.phase, effects: [...out.effects, "illegal_transition"] };
       }
       const from = this.state.phase;
@@ -603,7 +607,8 @@ export class PlanStateManager {
   }
 
   incrementClarification(): boolean {
-    if (this.state.clarificationCount >= MAX_CLARIFICATIONS) return false;
+    if (getWorkflowControlDescriptor().enforcesClarificationLimit &&
+        this.state.clarificationCount >= MAX_CLARIFICATIONS) return false;
     this.state.clarificationCount++;
     return true;
   }

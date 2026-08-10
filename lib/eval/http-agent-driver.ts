@@ -76,6 +76,19 @@ function toState(state: RawPlanState): EvalStateSnapshot {
   };
 }
 
+function phaseAt(
+  timestamp: number,
+  history: NonNullable<RawPlanState["history"]>,
+  fallback: PlanPhase,
+): PlanPhase {
+  let phase = history[0]?.phase ?? fallback;
+  for (const item of history) {
+    if (item.at > timestamp) break;
+    phase = item.phase;
+  }
+  return phase;
+}
+
 export class HttpAgentDriver implements EvalAgentDriver {
   readonly target: EvalTarget;
   private readonly headers: Record<string, string>;
@@ -159,8 +172,8 @@ export class HttpAgentDriver implements EvalAgentDriver {
     const messages = sessionBody.context?.messages ?? [];
     const freshMessages = messages.slice(this.messageCursor);
     this.messageCursor = messages.length;
-    const events = this.messagesToEvents(freshMessages, rawState.phase);
     const history = rawState.history ?? [];
+    const events = this.messagesToEvents(freshMessages, rawState.phase, history);
     for (const item of history.slice(this.historyCursor)) {
       events.push({
         at: new Date(item.at).toISOString(),
@@ -175,11 +188,14 @@ export class HttpAgentDriver implements EvalAgentDriver {
 
   private messagesToEvents(
     messages: SessionMessage[],
-    phase: PlanPhase,
+    fallbackPhase: PlanPhase,
+    history: NonNullable<RawPlanState["history"]>,
   ): Omit<EvalTraceEvent, "sequence">[] {
     const events: Omit<EvalTraceEvent, "sequence">[] = [];
     for (const message of messages) {
-      const at = new Date(message.timestamp ?? Date.now()).toISOString();
+      const timestamp = message.timestamp ?? Date.now();
+      const at = new Date(timestamp).toISOString();
+      const phase = phaseAt(timestamp, history, fallbackPhase);
       if (message.role === "assistant") {
         const text = textFromContent(message.content);
         if (text) events.push({ at, type: "assistant_message", message: text, phase });

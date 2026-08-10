@@ -10,6 +10,9 @@ try {
 } catch { /* package not found, use default */ }
 
 const nextConfig: NextConfig = {
+  // A/B evaluation runs two dev servers from the same checkout. Each server
+  // needs its own distDir because Next uses <distDir>/dev/lock.
+  distDir: process.env.NEXT_DIST_DIR?.trim() || ".next",
   output: "standalone",
   serverExternalPackages: ["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai"],
   allowedDevOrigins: ['192.168.*.*'],

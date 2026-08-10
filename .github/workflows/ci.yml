@@ -40,6 +40,9 @@ jobs:
       - name: Eval V1 deterministic contract
         run: npm run test:eval:v1
 
+      - name: Agent control A/B contract
+        run: npm run test:eval:ab
+
       - name: Eval V2 preference contract
         run: npm run test:eval:v2
 

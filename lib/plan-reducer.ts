@@ -118,3 +118,32 @@ export function reduce(state: PlanState, event: PlanEvent): ReduceOutput {
 
   return stay();
 }
+
+/**
+ * Evaluation-only event projection for the prompt-only baseline.
+ *
+ * It keeps state observable for the shared UI/evaluator, but deliberately removes
+ * phase preconditions. Data-integrity checks such as the confirmed plan hash stay
+ * in place because they are not the workflow-control variable being ablated.
+ */
+export function reduceObserveOnly(state: PlanState, event: PlanEvent): ReduceOutput {
+  const regular = reduce(state, event);
+  const goto = (phase: PlanPhase, plan?: ProposedPlan): ReduceOutput => ({ phase, plan, effects: [] });
+
+  switch (event.type) {
+    case "PLAN_SUBMITTED":
+      return goto("plan_confirm", event.plan);
+    case "CLARIFICATION_ANSWERED":
+      return goto("planning");
+    case "USER_CONFIRMED":
+      return event.planHash === hashOf(state.plan)
+        ? goto("executing")
+        : { phase: state.phase, effects: ["reject"] };
+    case "BOOKING_RESULT":
+      return goto(event.ok ? "completed" : "plan_confirm");
+    case "PLAN_SAVED":
+      return goto("completed");
+    default:
+      return regular;
+  }
+}

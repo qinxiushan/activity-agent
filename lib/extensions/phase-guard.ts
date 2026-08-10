@@ -3,6 +3,7 @@ import { getActivePlanState } from "../plan-state";
 import { sanitizeToolResult } from "../tool-result-sanitizer";
 import { checkToolRateLimit } from "../rate-limiter";
 import { audit } from "../audit-logger";
+import { evaluateWorkflowToolCall } from "../workflow-control/policy";
 
 const BUSINESS_TOOLS = new Set([
   "classify_turn", "intent_parse", "submit_plan", "ask_clarification", "detect_user_region",
@@ -31,7 +32,20 @@ export default function phaseGuardExtension(pi: ExtensionAPI): void {
     if (!mgr) return;
     const userId = mgr.userId ?? null;
     const sessionId = mgr.current.sessionId;
-    const result = mgr.guardToolCall(event.toolName);
+    const result = evaluateWorkflowToolCall(event.toolName, mgr.currentPhase);
+    if (result.wouldBlock && result.allowed) {
+      audit({
+        userId,
+        sessionId,
+        eventType: "tool_would_block",
+        toolName: event.toolName,
+        detail: {
+          controlVariant: "observe_only",
+          currentPhase: result.currentPhase,
+          reason: result.reason,
+        },
+      });
+    }
     if (!result.allowed) {
       audit({
         userId,
@@ -40,12 +54,12 @@ export default function phaseGuardExtension(pi: ExtensionAPI): void {
         toolName: event.toolName,
         detail: {
           currentPhase: result.currentPhase,
-          reason: result.error,
+          reason: result.reason,
         },
       });
       return {
         block: true,
-        reason: `Tool "${event.toolName}" is not allowed in phase "${result.currentPhase}".`,
+        reason: result.reason ?? `Tool "${event.toolName}" is not allowed in phase "${result.currentPhase}".`,
       };
     }
 

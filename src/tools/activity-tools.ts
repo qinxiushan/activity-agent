@@ -54,6 +54,7 @@ import { ItineraryValidator } from "../../lib/itinerary-validator";
 import type { RoutePoint } from "../../lib/data-provider";
 import { BudgetService, type BudgetBreakdown } from "../../lib/budget-service";
 import { normalizeClarification } from "../../lib/clarification";
+import { isWorkflowControlEnforced } from "../../lib/workflow-control/config";
 
 // ─── Schema 定义 ──────────────────────────────────────────────────
 
@@ -584,7 +585,7 @@ export function getActivityPlannerTools(): ToolDefinition[] {
           },
         };
       }
-      if (mgr.currentPhase !== "planning") {
+      if (isWorkflowControlEnforced() && mgr.currentPhase !== "planning") {
         return toolError(
           "SUBMIT_PLAN_OUT_OF_PHASE",
           `submit_plan 仅在 planning 阶段合法（当前阶段: ${mgr.currentPhase}）。`,

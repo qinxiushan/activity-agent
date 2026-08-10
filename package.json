@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 30142",
+    "dev:eval:loop": "NEXT_DIST_DIR=.next-eval-loop EVAL_CONTROL_VARIANT=observe_only EVAL_ALLOW_UNSAFE_BASELINE=1 next dev -p 30143",
     "build": "next build --webpack",
     "start": "next start -p 30142",
     "lint": "eslint .",
@@ -17,6 +18,8 @@
     "eval:quality": "tsx scripts/v5-quality-eval.ts",
     "test:eval:v1": "tsx scripts/eval-v1-contract-test.ts",
     "eval:agent:v1": "tsx scripts/eval-agent-v1.ts",
+    "eval:agent:ab": "node --import tsx scripts/eval-agent-ab.ts",
+    "test:eval:ab": "node --import tsx scripts/eval-ab-contract-test.ts",
     "eval:intent-routing": "tsx scripts/eval-intent-routing.ts",
     "test:eval:v2": "tsx scripts/eval-v2-contract-test.ts",
     "eval:review:v2": "tsx scripts/eval-review-v2.ts",

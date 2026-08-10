@@ -73,6 +73,8 @@ export interface EvalUserGoal {
 
 export type ScriptedUserTrigger =
   | { kind: "phase"; phase: PlanPhase }
+  | { kind: "plan_available" }
+  | { kind: "clarification_available" }
   | { kind: "assistant_includes"; text: string }
   | { kind: "tool_called"; toolName: string };
 

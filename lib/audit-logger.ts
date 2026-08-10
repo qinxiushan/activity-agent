@@ -11,6 +11,7 @@ export interface AuditEvent {
   eventType:
     | "tool_call"
     | "tool_blocked"
+    | "tool_would_block"
     | "rate_limited"
     | "injection_detected"
     | "login"
