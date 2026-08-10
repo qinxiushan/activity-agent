@@ -66,9 +66,7 @@ docker compose up -d --build # app + postgres + redis + prometheus + grafana
 
 Workflow file: **`.github/workflows/ci.yml`**
 
-<!-- TODO: replace OWNER/REPO with actual GitHub path after first push -->
-
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![CI](https://github.com/qinxiushan/activity-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/qinxiushan/activity-agent/actions/workflows/ci.yml)
 
 Three jobs:
 
@@ -76,18 +74,18 @@ Three jobs:
 | -------------- | --------------------------------- | ---------------------- | ----------------------------------------- | ------- |
 | **lint** | every push + PR                   | ❌                     | `tsc --noEmit` + smoke + Eval V1/V2 contracts | 5 min   |
 | **auth-e2e** | every push + PR                | ❌                     | required-auth Playwright (`npm run e2e:auth`) | 10 min |
-| **e2e**  | push to`main` + manual dispatch | ✅`DEEPSEEK_API_KEY` | full LLM e2e（PG + Redis services, `AUTH_MODE=optional`） | 10 min  |
+| **e2e**  | manual dispatch only             | ✅`DEEPSEEK_API_KEY` | full LLM e2e（PG + Redis services, `AUTH_MODE=optional`） | 10 min  |
 
 **Setup after first `git push`**:
 
 1. Go to repo **Settings → Secrets and variables → Actions**
 2. Click **New repository secret**
 3. Name: `DEEPSEEK_API_KEY`, Value: your `sk-...` from https://platform.deepseek.com
-4. Done — next push to main will run e2e automatically
+4. Done — use **Actions → CI → Run workflow** when you want to run the real-model E2E
 
 **Swap provider**: edit `.github/workflows/ci.yml` lines 76-83 (`Write deepseek config` step) and the `env:` block above. Pattern is identical for any built-in provider (see [`docs/MODEL_CONFIG.md`](docs/MODEL_CONFIG.md) §实战 2).
 
-**Save API credits on PRs**: e2e is intentionally gated to `push` events on `main` + manual `workflow_dispatch`. PRs only run `lint`. Use **Actions → CI → Run workflow** to force an e2e on a PR branch.
+**Save API credits**: real-model e2e runs only through manual `workflow_dispatch`; ordinary pushes and PRs run deterministic checks plus required-auth E2E without consuming model credits. Use **Actions → CI → Run workflow** when a real-model acceptance run is needed.
 
 ## Model Configuration — 3 Files, Not 1
 
