@@ -2,6 +2,7 @@
   "name": "@agegr/activity-agent",
   "version": "0.2.0",
   "private": true,
+  "license": "Apache-2.0",
   "scripts": {
     "dev": "next dev -p 30142",
     "dev:eval:loop": "NEXT_DIST_DIR=.next-eval-loop EVAL_CONTROL_VARIANT=observe_only EVAL_ALLOW_UNSAFE_BASELINE=1 next dev -p 30143",
